@@ -1,0 +1,50 @@
+# 언론보도 모니터링 (NewsMonitor)
+
+네이버 뉴스에서 키워드별 기사를 모아 중복을 정리하고, 사내메일에 붙여넣을 수 있는
+HTML 보고서(제목에 링크)를 만드는 PC 프로그램입니다.
+
+## 설치 (처음 한 번)
+
+1. 오른쪽 **Releases** 에서 최신 버전의 `NewsMonitor.exe` 를 내려받습니다.
+2. 적당한 폴더(예: `C:\NewsMonitor\`)에 넣고 실행합니다.
+   - 윈도우가 "알 수 없는 게시자" 경고를 띄우면 **추가 정보 → 실행** 을 누르세요(서명 없는 프로그램이라 뜨는 안내입니다).
+   - exe 옆에 `config.json`, `sent_history.json`, `reports\` 가 자동으로 생깁니다. 이 폴더 안에서 모든 것이 관리됩니다.
+3. **[설정]** 버튼 → 네이버 Client ID / Client Secret 입력 → 저장
+   - developers.naver.com → 내 애플리케이션 → 등록한 앱에서 확인
+
+## 매일 사용 흐름
+
+1. 기간(기본: 어제~오늘)과 키워드 확인 → **조회**
+2. 결과 표에서 보낼 필요 없는 기사는 `☑` 를 눌러 `☐` 로 바꿈 (더블클릭하면 기사 원문이 열림)
+3. **HTML 보고서 열기** → 브라우저에서 `Ctrl+A` → `Ctrl+C`
+4. 그룹웨어 **편지쓰기** 본문에 `Ctrl+V` → 제목·링크가 그대로 들어감 → 보내기
+5. **보고 완료로 기록** → 다음 조회부터 오늘 보낸 기사는 자동 제외
+
+## 새 버전 배포 (관리자용)
+
+1. 수정된 파일을 GitHub 웹 화면에서 업로드하거나 Claude Code 로 push 한다.
+2. `version.py` 의 `__version__` 을 올린다(예: `0.1.0` → `0.2.0`). **이 숫자가 바뀌어야 새 Release 가 만들어진다.**
+3. `CHANGELOG.md` 맨 위에 변경 내용을 적는다 (Release 설명으로 그대로 들어감).
+4. 업로드 후 2~4분이면 **Actions** 탭에서 빌드가 끝나고 **Releases** 에 새 exe 가 올라온다.
+5. 사용자 PC 의 앱은 다음 실행 때 새 버전을 알려 주고, 확인을 누르면 스스로 교체·재시작한다.
+
+## 파일 구성
+
+| 파일 | 역할 |
+|---|---|
+| `app.py` | 화면(GUI). 버튼·표·설정창 |
+| `naver_api.py` | 네이버 뉴스 검색 API 호출 |
+| `dedup.py` | 중복·유사 기사 제거, 제외어 |
+| `report.py` | 메일용 HTML 보고서 생성 |
+| `history.py` | 보고 완료 기사 기록 |
+| `sources.py` | 언론사 도메인 → 매체명 표 |
+| `updater.py` | GitHub Release 확인·자동 교체 |
+| `config.py` | 설정 파일 읽기/쓰기 |
+| `version.py` | 버전 번호 (배포 시 여기만 수정) |
+| `.github/workflows/build.yml` | GitHub 가 exe 를 자동으로 만드는 설정 |
+| `docs/개발일지.md` | 개발 과정에서 배운 것·결정한 것 기록 |
+
+## 보안 메모
+
+- 네이버 API 키는 이 PC 의 `config.json` 에만 저장되며 GitHub 에는 올라가지 않습니다(`.gitignore`).
+- 프로그램은 네이버 API(`openapi.naver.com`)와 GitHub(`api.github.com`, `github.com`) 두 곳에만 접속합니다.
