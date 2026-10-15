@@ -6,9 +6,15 @@
 - 제목 끝에 " - 매체명"이 붙어 오므로 떼고, 매체명은 <source> 에서 가져온다.
 - 한 번에 최대 100건 정도만 준다. 100건이 꽉 차면 기간을 반으로 나눠 다시 묻는다.
 - 결과는 네이버와 같은 Article 형태로 돌려주므로 중복제거·보고서는 그대로 쓴다.
+- RSS 의 기사 링크는 구글을 거치는 주소(news.google.com/rss/articles/…)다.
+  보고서에 넣을 기사만 resolve_links()로 언론사 원문 주소로 바꾼다(요청 수를 줄이려고).
+  구글이 공식 제공하는 기능이 아니라서, 실패하면 구글 주소를 그대로 쓴다.
 """
 
+import base64
 import datetime as dt
+import json
+import re
 import xml.etree.ElementTree as ET
 
 import requests
@@ -20,6 +26,14 @@ KST = dt.timezone(dt.timedelta(hours=9))
 PAGE_LIMIT = 100      # 구글이 한 번에 주는 최대 건수(대략)
 MAX_SPLIT_DEPTH = 4   # 기간 나누기는 최대 4번까지(요청이 너무 많아지지 않게)
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NewsMonitor"}
+
+ARTICLE_PAGE = "https://news.google.com/rss/articles/{}"
+BATCH_URL = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
+_ID_RE = re.compile(r"news\.google\.com/(?:rss/)?articles/([^?/#]+)")
+_SG_RE = re.compile(r'data-n-a-sg="([^"]+)"')
+_TS_RE = re.compile(r'data-n-a-ts="([^"]+)"')
+_URL_BYTES_RE = re.compile(rb"https?://[\x21-\x7e]+")
+_resolved: dict[str, str] = {}  # 구글 주소 → 원문 주소 (앱을 켜 둔 동안 기억)
 
 
 def build_query(keyword: str, start_date: dt.date, end_date: dt.date) -> str:
@@ -103,3 +117,82 @@ def search_news(keyword: str, start_date: dt.date, end_date: dt.date) -> list[Ar
         seen.add(art.link)
         results.append(art)
     return results
+
+
+# ------------------------------------------------------------ 원문 주소 찾기
+def is_google_link(url: str) -> bool:
+    return bool(_ID_RE.search(url or ""))
+
+
+def _decode_old_format(art_id: str) -> str | None:
+    """예전 형식은 주소 안에 원문 주소가 그대로 암호화 없이(base64) 들어 있다."""
+    try:
+        raw = base64.urlsafe_b64decode(art_id + "=" * (-len(art_id) % 4))
+    except (ValueError, TypeError):
+        return None
+    m = _URL_BYTES_RE.search(raw)
+    return m.group().decode("ascii") if m else None
+
+
+def _parse_batch_response(text: str) -> str | None:
+    """구글 응답(앞에 )]}' 가 붙은 JSON)에서 원문 주소를 꺼낸다."""
+    start = text.find("[")
+    if start < 0:
+        return None
+    rows, _ = json.JSONDecoder().raw_decode(text[start:])
+    for row in rows:
+        if isinstance(row, list) and len(row) > 2 and row[0] == "wrb.fr" and isinstance(row[2], str):
+            inner = json.loads(row[2])
+            if len(inner) > 1 and isinstance(inner[1], str) and inner[1].startswith("http"):
+                return inner[1]
+    return None
+
+
+def _decode_new_format(art_id: str) -> str | None:
+    """요즘 형식은 구글에 한 번 더 물어야 한다: 기사 페이지에서 서명값을 읽고 → 변환 요청."""
+    page = requests.get(ARTICLE_PAGE.format(art_id), headers=HEADERS, timeout=10)
+    sg, ts = _SG_RE.search(page.text), _TS_RE.search(page.text)
+    if page.status_code != 200 or not sg or not ts:
+        return None
+    req = ('["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],'
+           f'"X","X",1,[1,1,1],1,1,null,0,0,null,0],"{art_id}",{ts.group(1)},"{sg.group(1)}"]')
+    resp = requests.post(
+        BATCH_URL,
+        data={"f.req": json.dumps([[["Fbv4je", req, None, "generic"]]])},
+        headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        return None
+    return _parse_batch_response(resp.text)
+
+
+def resolve_link(url: str) -> str:
+    """구글 주소를 언론사 원문 주소로 바꾼다. 실패하면 받은 주소를 그대로 돌려준다."""
+    m = _ID_RE.search(url or "")
+    if not m:
+        return url
+    if url in _resolved:
+        return _resolved[url]
+    art_id = m.group(1)
+    direct = _decode_old_format(art_id)
+    if not direct:
+        try:
+            direct = _decode_new_format(art_id)
+        except (requests.RequestException, ValueError, IndexError, TypeError):
+            direct = None
+    if direct and not is_google_link(direct):
+        _resolved[url] = direct
+        return direct
+    return url
+
+
+def resolve_links(urls: list[str], progress=None) -> dict[str, str]:
+    """여러 주소를 한꺼번에. progress(완료 수, 전체 수)로 진행 상황을 알린다."""
+    out: dict[str, str] = {}
+    targets = [u for u in dict.fromkeys(urls) if is_google_link(u)]
+    for i, u in enumerate(targets, 1):
+        out[u] = resolve_link(u)
+        if progress:
+            progress(i, len(targets))
+    return out

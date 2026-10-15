@@ -5,6 +5,7 @@
 자동 실행 버전을 만들 때 아래 모듈들을 그대로 쓸 수 있다.
 """
 
+import dataclasses
 import datetime as dt
 import threading
 import tkinter as tk
@@ -288,7 +289,18 @@ class App(tk.Tk):
             return
         idx = self.tree.index(iid)
         if 0 <= idx < len(self.articles):
-            webbrowser.open(self.articles[idx].link or self.articles[idx].naver_link)
+            url = self.articles[idx].link or self.articles[idx].naver_link
+            if google_news.is_google_link(url):
+                # 원문 주소 찾기는 인터넷을 거치므로 화면이 멈추지 않게 따로 돌린다
+                self._set_status("기사 원문 주소 확인 중…")
+                threading.Thread(target=lambda: self.after(
+                    0, self._open_url, google_news.resolve_link(url)), daemon=True).start()
+            else:
+                webbrowser.open(url)
+
+    def _open_url(self, url: str):
+        self._set_status("기사 열기" + (" (원문 주소를 못 찾아 구글 경유)" if google_news.is_google_link(url) else ""))
+        webbrowser.open(url)
 
     def _selected_articles(self) -> list[Article]:
         out = []
@@ -303,13 +315,26 @@ class App(tk.Tk):
         if not selected:
             messagebox.showinfo("보고서", "포함할 기사가 없습니다. 먼저 조회하세요.")
             return
+        threading.Thread(target=self._report_worker, args=(selected,), daemon=True).start()
+
+    def _report_worker(self, selected: list[Article]):
+        # 구글 경유 주소는 보고서에 넣기 전에 언론사 원문 주소로 바꾼다(실패하면 구글 주소 유지).
+        # 보고 완료 기록은 조회 때와 같은 주소(구글 주소)로 해야 다음 조회에서 걸러지므로 사본만 바꾼다.
+        def progress(i, n):
+            self.after(0, self._set_status, f"기사 원문 주소 확인 중… ({i}/{n})")
+        links = google_news.resolve_links([a.link for a in selected], progress)
+        report_items = [dataclasses.replace(a, link=links.get(a.link, a.link)) for a in selected]
+        failed = sum(1 for a in report_items if google_news.is_google_link(a.link))
+        self.after(0, self._report_done, report_items, failed)
+
+    def _report_done(self, report_items: list[Article], failed: int):
         start = parse_date(self.start_var.get())
         end = parse_date(self.end_var.get())
-        body = report.build_html(selected, self.cfg["keywords"], start, end,
+        body = report.build_html(report_items, self.cfg["keywords"], start, end,
                                  self.cfg.get("report_title", "언론보도 모니터링"))
         path = report.save_report(body)
         webbrowser.open("file:///" + path.replace("\\", "/"))
-        self._set_status(f"보고서 저장: {path}")
+        self._set_status(f"보고서 저장: {path}" + (f" (원문 주소 못 찾은 {failed}건은 구글 경유)" if failed else ""))
 
     def _mark_sent(self):
         selected = self._selected_articles()
