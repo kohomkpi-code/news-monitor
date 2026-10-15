@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import updater  # noqa: E402
@@ -30,20 +31,31 @@ bat = os.path.join(tempfile.gettempdir(), "newsmonitor_update_test.bat")
 with open(bat, "w", encoding="ascii", newline="\r\n") as f:
     f.write(updater._UPDATE_BAT)
 
-holder = subprocess.Popen([sys.executable, "-c", f"import time; f = open({cur!r}, 'rb'); time.sleep(4)"])
-app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
-time.sleep(0.5)
-started = time.time()
-cmd = f'cmd /d /s /c ""{bat}" "{new}" "{cur}" {app.pid} "{log}" norun"'
-subprocess.run(cmd, timeout=120, check=True)
-holder.wait()
+def main():
+    holder = subprocess.Popen([sys.executable, "-c", f"import time; f = open({cur!r}, 'rb'); time.sleep(4)"])
+    app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
+    time.sleep(0.5)
+    started = time.time()
+    cmd = f'cmd /d /s /c ""{bat}" "{new}" "{cur}" {app.pid} "{log}" norun"'
+    r = subprocess.run(cmd, timeout=120, capture_output=True, text=True, errors="replace")
+    print(f"배치 종료코드 {r.returncode}", r.stdout, r.stderr)
+    holder.wait()
 
-with open(cur) as f:
-    content = f.read()
-with open(log) as f:
-    log_text = f.read()
-print(f"걸린 시간 {time.time() - started:.1f}초 / 로그: {log_text.strip()}")
-assert content == "NEW", f"교체 실패: {content}"
-assert not os.path.exists(new), "새 파일이 남아 있음"
-assert "OK" in log_text, log_text
-print("업데이트 교체 시험 통과")
+    with open(cur) as f:
+        content = f.read()
+    log_text = open(log).read() if os.path.exists(log) else "(로그 없음)"
+    print(f"걸린 시간 {time.time() - started:.1f}초 / 로그: {log_text.strip()}")
+    assert content == "NEW", f"교체 실패: {content}"
+    assert not os.path.exists(new), "새 파일이 남아 있음"
+    assert "OK" in log_text, log_text
+    print(f"::notice title=업데이트 교체 시험 통과::{time.time() - started:.1f}초, 로그 {log_text.strip()}, 배치 종료코드 {r.returncode}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        # GitHub 화면의 주석(annotation)으로 남겨 원인을 바로 볼 수 있게
+        print(f"::error title=업데이트 교체 시험 실패::{type(e).__name__}: {e}".replace("\n", " | "))
+        traceback.print_exc()
+        sys.exit(1)

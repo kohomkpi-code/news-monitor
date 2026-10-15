@@ -141,7 +141,7 @@ goto run
 if "%~5"=="norun" goto end
 start "" "%CUR%"
 :end
-del "%~f0"
+(goto) 2>nul & del "%~f0"
 """
 
 
