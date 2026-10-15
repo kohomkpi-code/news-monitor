@@ -44,15 +44,40 @@ def is_newer(remote: str, local: str = __version__) -> bool:
     return _parse(remote) > _parse(local)
 
 
-def check_latest(timeout: int = 10) -> ReleaseInfo | None:
-    """최신 Release 정보. 네트워크 오류나 Release 가 없으면 None."""
+class UpdateCheckError(Exception):
+    """업데이트 확인 실패 이유(상태 표시줄에 보여 줌)."""
+
+
+def _latest_by_redirect(timeout: int) -> ReleaseInfo:
+    """API 가 막혔을 때(예: 같은 인터넷 주소를 쓰는 사람이 많아 시간당 60회 한도 초과)
+    github.com/…/releases/latest 가 최신 태그 주소로 넘겨 주는 것을 이용한다."""
+    resp = requests.get(f"{RELEASES_PAGE}/latest", timeout=timeout, allow_redirects=False)
+    loc = resp.headers.get("Location", "")
+    if resp.status_code not in (301, 302) or "/tag/" not in loc:
+        raise UpdateCheckError(f"GitHub 응답 {resp.status_code}")
+    tag = loc.rsplit("/tag/", 1)[1]
+    return ReleaseInfo(
+        version=tag,
+        asset_url=f"{RELEASES_PAGE}/download/{tag}/{EXE_NAME}",
+        page_url=loc,
+        notes="",
+    )
+
+
+def check_latest(timeout: int = 10) -> ReleaseInfo:
+    """최신 Release 정보. 실패하면 UpdateCheckError(이유)."""
     try:
         resp = requests.get(API_LATEST, timeout=timeout,
                             headers={"Accept": "application/vnd.github+json"})
-    except requests.RequestException:
-        return None
+    except requests.exceptions.SSLError as e:
+        raise UpdateCheckError("보안 인증서 확인 실패(회사 보안장비)") from e
+    except requests.RequestException as e:
+        raise UpdateCheckError(f"네트워크 오류: {type(e).__name__}") from e
     if resp.status_code != 200:
-        return None
+        try:
+            return _latest_by_redirect(timeout)
+        except requests.RequestException as e:
+            raise UpdateCheckError(f"GitHub 응답 {resp.status_code}") from e
     data = resp.json()
     asset_url = None
     for a in data.get("assets", []):
@@ -85,32 +110,63 @@ def download(url: str, dest: str, progress=None) -> None:
                         progress(done / total)
 
 
+# 교체용 배치 파일. 경로는 글자로 써 넣지 않고 인자(%1~%4)로 넘긴다
+# (한글·공백이 든 경로도 깨지지 않게). 파일 자체는 영문만 쓴다.
+# 다섯 번째 인자 norun 은 시험용(교체만 하고 앱은 안 켬): tests/check_update_bat.py
+_UPDATE_BAT = r"""@echo off
+set "NEW=%~1"
+set "CUR=%~2"
+set "WAITPID=%~3"
+set "LOG=%~4"
+set n=0
+:wait
+tasklist /FI "PID eq %WAITPID%" 2>nul | find "%WAITPID%" >nul
+if not errorlevel 1 (
+  ping -n 2 127.0.0.1 >nul
+  goto wait
+)
+:move
+move /y "%NEW%" "%CUR%" >nul 2>&1
+if not errorlevel 1 goto ok
+set /a n+=1
+if %n% geq 60 goto fail
+ping -n 2 127.0.0.1 >nul
+goto move
+:fail
+>>"%LOG%" echo %date% %time% FAIL could not replace exe after 60 tries
+goto run
+:ok
+>>"%LOG%" echo %date% %time% OK replaced after %n% retries
+:run
+if "%~5"=="norun" goto end
+start "" "%CUR%"
+:end
+del "%~f0"
+"""
+
+
 def apply_update(asset_url: str, progress=None) -> None:
-    """새 exe 를 내려받고 교체용 배치 파일을 실행한 뒤 현재 앱을 종료한다."""
+    """새 exe 를 내려받고 교체용 배치 파일을 실행한 뒤 현재 앱을 종료한다.
+
+    exe(PyInstaller 한 파일 방식)는 실행하면 프로세스가 두 개 뜬다: 압축을 푸는 '바깥'과
+    실제 앱인 '안쪽'. 안쪽이 끝나도 바깥이 잠깐 exe 를 붙잡고 있어서, 곧바로 바꿔치기하면
+    실패한다(v0.3.0 까지의 버그 → 옛 버전이 다시 켜짐). 그래서 성공할 때까지 1초 간격으로
+    최대 60번 다시 시도하고, 결과를 exe 옆 update_log.txt 에 남긴다.
+    """
     if not is_frozen():
         raise RuntimeError("소스로 실행 중일 때는 자동 교체를 하지 않습니다.")
 
     current = sys.executable
     folder = os.path.dirname(current)
     new_path = os.path.join(folder, EXE_NAME.replace(".exe", ".new.exe"))
+    log_path = os.path.join(folder, "update_log.txt")
     download(asset_url, new_path, progress)
 
     bat = os.path.join(tempfile.gettempdir(), "newsmonitor_update.bat")
-    pid = os.getpid()
-    script = f"""@echo off
-chcp 65001 >nul
-:wait
-tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto wait
-)
-move /y "{new_path}" "{current}" >nul
-start "" "{current}"
-del "%~f0"
-"""
-    with open(bat, "w", encoding="utf-8") as f:
-        f.write(script)
+    with open(bat, "w", encoding="ascii", newline="\r\n") as f:
+        f.write(_UPDATE_BAT)
 
-    subprocess.Popen(["cmd", "/c", bat], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # cmd /s /c "…" : 바깥 따옴표 한 쌍만 벗기므로 안쪽 경로 따옴표가 그대로 살아남는다
+    cmdline = f'cmd /d /s /c ""{bat}" "{new_path}" "{current}" {os.getpid()} "{log_path}""'
+    subprocess.Popen(cmdline, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     os._exit(0)

@@ -649,13 +649,16 @@ class App(tk.Tk):
         threading.Thread(target=self._update_worker, args=(True,), daemon=True).start()
 
     def _update_worker(self, verbose: bool):
-        info = updater.check_latest()
+        try:
+            info = updater.check_latest()
+        except Exception as e:  # 어떤 오류든 '확인 중…'에 멈춰 있지 않게 이유를 보여 준다
+            info = str(e) or type(e).__name__
         self.after(0, self._update_result, info, verbose)
 
     def _update_result(self, info, verbose: bool):
-        if info is None:
+        if isinstance(info, str):
             if verbose:
-                self._set_status("업데이트 확인 실패 (네트워크 또는 Release 없음)")
+                self._set_status(f"업데이트 확인 실패: {info}")
             return
         if not updater.is_newer(info.version):
             if verbose:

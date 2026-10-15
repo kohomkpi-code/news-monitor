@@ -54,6 +54,12 @@ jobs:
         if: steps.ver.outputs.exists == 'false'
         run: pyinstaller --onefile --windowed --name NewsMonitor app.py
 
+      - name: 자동 업데이트 교체 시험 (실패하면 배포 중단)
+        if: steps.ver.outputs.exists == 'false'
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python tests/check_update_bat.py
+
       - name: 변경 내용 뽑기 (CHANGELOG 맨 위 항목)
         if: steps.ver.outputs.exists == 'false'
         run: |
