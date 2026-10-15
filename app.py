@@ -11,6 +11,15 @@ import tkinter as tk
 import webbrowser
 from tkinter import messagebox, ttk
 
+# 회사 보안장비가 HTTPS 를 검사하면서 자체 인증서로 바꿔 끼우면, Python 은 자기 인증서 목록만
+# 믿어서 접속을 거부한다(CERTIFICATE_VERIFY_FAILED). 브라우저처럼 윈도우 인증서 저장소를 믿게 한다.
+# requests 를 쓰는 모듈(google_news·naver_api·updater)보다 먼저 실행해야 한다.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:  # 실패해도 기존 방식으로 동작
+    pass
+
 import config
 import dedup
 import google_news

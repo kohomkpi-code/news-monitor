@@ -71,6 +71,9 @@ def _fetch(keyword: str, start_date: dt.date, end_date: dt.date) -> list[Article
     params = {"q": build_query(keyword, start_date, end_date), "hl": "ko", "gl": "KR", "ceid": "KR:ko"}
     try:
         resp = requests.get(RSS_URL, params=params, headers=HEADERS, timeout=15)
+    except requests.exceptions.SSLError as e:
+        raise NaverApiError("보안 인증서 확인 실패(구글 뉴스): 회사 보안장비가 접속을 검사하는 것으로 보입니다.\n"
+                            f"전산 담당에 이 메시지를 전달해 주세요.\n\n{e}") from e
     except requests.RequestException as e:
         raise NaverApiError(f"네트워크 오류(구글 뉴스): {e}") from e
     if resp.status_code == 429:
