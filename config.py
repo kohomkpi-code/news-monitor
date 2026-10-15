@@ -6,6 +6,7 @@
 - keywords_a(기관 직접, 무조건 후보) / keywords_b(정책·환경, 후보) 두 등급으로 나눈다.
   예전 "keywords" 는 두 목록을 합친 값으로 자동으로 맞춘다(하위 호환).
 - extra_feeds: 전문지 RSS 주소 목록. 주소가 바뀌면 여기만 고친다.
+- event_words: 단순 행사 기사를 거르는 단어(제목에 있으면 A 등급이라도 뺀다). [설정]에서 고친다.
 """
 
 import json
@@ -27,6 +28,11 @@ DEFAULT_CONFIG = {
     ],
     "keywords": [],            # keywords_a + keywords_b (자동)
     "exclude_words": ["분양", "청약", "시세", "투자", "주식", "매매", "전세사기 피해지원 신청"],
+    "exclude_events": True,    # 단순 행사 기사 제외 (A 등급에도 적용)
+    "event_words": [
+        "축제", "성료", "성황", "한마당", "바자회", "김장", "나눔 행사", "나눔행사", "봉사활동", "봉사단",
+        "잔치", "플리마켓", "벼룩시장", "발대식", "체육대회", "운동회", "음악회", "연탄", "송년",
+    ],
     "use_feeds": True,         # 전문지 RSS 함께 조회
     "extra_feeds": [
         {"name": "아파트관리신문", "url": "https://www.aptn.co.kr/rss/allArticle.xml"},

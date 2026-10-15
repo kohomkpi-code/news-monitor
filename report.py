@@ -66,7 +66,7 @@ def build_html(
             parts.append(
                 f'<li style="margin:0 0 3px 0">'
                 f'<a href="{esc(art.link or art.naver_link)}" style="color:#1a4b8f;text-decoration:none">{esc(art.title)}</a>'
-                f' <span style="color:#777;font-size:10pt">({esc(art.source)}, {art.published.strftime("%m.%d")})</span>'
+                f' <span style="color:#777;font-size:10pt">({esc(art.source_label)}, {art.published.strftime("%m.%d")})</span>'
                 f'{extra}</li>'
             )
         parts.append("</ul>")
@@ -82,7 +82,7 @@ def _item_html(art: Article, extra: str = "") -> str:
     esc = html.escape
     return (
         f'<a href="{esc(art.link or art.naver_link)}" style="color:#1a4b8f;text-decoration:none">{esc(art.title)}</a>'
-        f' <span style="color:#777;font-size:10pt">({esc(art.source)}, {art.published.strftime("%m.%d")})</span>'
+        f' <span style="color:#777;font-size:10pt">({esc(art.source_label)}, {art.published.strftime("%m.%d")})</span>'
         f'{extra}'
     )
 

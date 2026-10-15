@@ -123,7 +123,10 @@ class App(tk.Tk):
         self.exclude_sent_var = tk.BooleanVar()
         self.merge_similar_var = tk.BooleanVar()
         ttk.Checkbutton(opt, text="이미 보고한 기사 제외", variable=self.exclude_sent_var).pack(side="left")
-        ttk.Checkbutton(opt, text="제목이 거의 같은 기사 묶기", variable=self.merge_similar_var).pack(side="left", padx=12)
+        ttk.Checkbutton(opt, text="같은 사안 기사 묶기 (매체만 다른 기사)", variable=self.merge_similar_var).pack(side="left", padx=12)
+        self.exclude_events_var = tk.BooleanVar()
+        ttk.Checkbutton(opt, text="단순 행사 기사 제외 (축제·나눔 등, 단어는 [설정])",
+                        variable=self.exclude_events_var).pack(side="left")
         self.search_btn = ttk.Button(opt, text="  조  회  ", command=self._search)
         self.search_btn.pack(side="right")
 
@@ -185,6 +188,7 @@ class App(tk.Tk):
         self.ex_text.insert("1.0", "\n".join(self.cfg.get("exclude_words", [])))
         self.exclude_sent_var.set(bool(self.cfg.get("exclude_sent", True)))
         self.merge_similar_var.set(bool(self.cfg.get("merge_similar", True)))
+        self.exclude_events_var.set(bool(self.cfg.get("exclude_events", True)))
 
     def _save_ui_into_config(self):
         self.cfg["keywords_a"] = self._lines(self.kw_a_text)
@@ -193,6 +197,7 @@ class App(tk.Tk):
         self.cfg["exclude_words"] = self._lines(self.ex_text)
         self.cfg["exclude_sent"] = self.exclude_sent_var.get()
         self.cfg["merge_similar"] = self.merge_similar_var.get()
+        self.cfg["exclude_events"] = self.exclude_events_var.get()
         config.save(self.cfg)
 
     @staticmethod
@@ -281,15 +286,21 @@ class App(tk.Tk):
         # 제외어는 B 에만 적용한다(A 는 '무조건 포함').
         found = [a for a in found if a.grade == "A"] + dedup.apply_exclude(
             [a for a in found if a.grade != "A"], self.cfg.get("exclude_words", []))
+        events_skipped = 0
+        if self.cfg.get("exclude_events", True):
+            # 단순 행사 기사는 A 등급이라도 뺀다
+            before = len(found)
+            found = dedup.apply_exclude(found, self.cfg.get("event_words", []))
+            events_skipped = before - len(found)
         found = dedup.dedupe(found, self.cfg.get("merge_similar", True),
-                             float(self.cfg.get("similar_threshold", 0.85)))
+                             float(self.cfg.get("similar_threshold", 0.85)), self.cfg.get("keywords", []))
         sent_skipped = 0
         if self.cfg.get("exclude_sent", True):
             sent = history.load()
             before = len(found)
-            found = [a for a in found if not history.is_sent(a.link or a.naver_link, sent)]
+            found = [a for a in found if not history.is_sent(a.all_links, sent)]
             sent_skipped = before - len(found)
-        self.after(0, self._search_done, found, raw_count, sent_skipped, feed_failed)
+        self.after(0, self._search_done, found, raw_count, sent_skipped, feed_failed, events_skipped)
 
     def _search_failed(self, msg: str):
         self.searching = False
@@ -297,14 +308,15 @@ class App(tk.Tk):
         self._set_status("조회 실패")
         messagebox.showerror("조회 실패", msg)
 
-    def _search_done(self, found: list[Article], raw_count: int, sent_skipped: int, feed_failed: list[str]):
+    def _search_done(self, found: list[Article], raw_count: int, sent_skipped: int, feed_failed: list[str],
+                     events_skipped: int = 0):
         self.searching = False
         self.search_btn.state(["!disabled"])
         for art in found:
             art.keywords.sort(key=self._keyword_rank)
             iid = self.tree.insert("", "end", values=(
                 CHECK_ON, art.grade, art.category, ", ".join(art.keywords),
-                art.date_str, art.source, art.title))
+                art.date_str, art.source_label, art.title))
             self.art_by_iid[iid] = art
             self.checked[iid] = True
         self._sort_by("grade", reverse=False)  # 기본: A 가 위, 그 안에서 최신순
@@ -312,7 +324,11 @@ class App(tk.Tk):
 
         n_a = sum(1 for a in found if a.grade == "A")
         src = SOURCE_LABELS[self._source()] + ("+전문지" if self.cfg.get("use_feeds", True) else "")
-        msg = (f"[{src}] 수집 {raw_count}건 → 정리 후 {len(found) + sent_skipped}건"
+        merged = sum(len(a.others) for a in found)
+        msg = (f"[{src}] 수집 {raw_count}건"
+               + (f" → 행사 {events_skipped}건 제외" if events_skipped else "")
+               + (f" → 같은 사안 {merged}건 묶음" if merged else "")
+               + f" → 정리 후 {len(found) + sent_skipped}건"
                + (f" → 기보고 {sent_skipped}건 제외" if sent_skipped else "")
                + f" → 표시 {len(found)}건 (A {n_a} · B {len(found) - n_a})")
         if feed_failed:
@@ -582,7 +598,7 @@ class App(tk.Tk):
         if not messagebox.askyesno("보고 완료", f"선택된 {len(selected)}건을 보고 완료로 기록할까요?\n"
                                    "다음 조회부터 '이미 보고한 기사 제외'로 걸러집니다."):
             return
-        n = history.mark_sent([a.link or a.naver_link for a in selected])
+        n = history.mark_sent([link for a in selected for link in a.all_links])
         self._set_status(f"보고 완료 기록: {n}건 추가")
 
     # ------------------------------------------------------------ 설정
@@ -626,9 +642,24 @@ class App(tk.Tk):
                             "이 값은 이 PC 의 config.json 에만 저장됩니다.",
                   foreground="#666").grid(row=len(fields) + 2, column=0, columnspan=2, sticky="w", pady=(8, 4))
 
+        r = len(fields) + 3
+        ttk.Label(frm, text="단순 행사 단어").grid(row=r, column=0, sticky="nw", pady=4)
+        ev_frm = ttk.Frame(frm)
+        ev_frm.grid(row=r, column=1, sticky="w", pady=4, padx=(10, 0))
+        ev_text = tk.Text(ev_frm, width=44, height=6, font=FONT)
+        ev_sb = ttk.Scrollbar(ev_frm, orient="vertical", command=ev_text.yview)
+        ev_text.configure(yscrollcommand=ev_sb.set)
+        ev_text.pack(side="left")
+        ev_sb.pack(side="left", fill="y")
+        ev_text.insert("1.0", "\n".join(self.cfg.get("event_words", [])))
+        ttk.Label(frm, text="한 줄에 하나. 제목에 이 단어가 있으면 A 등급이라도 뺍니다\n"
+                            "(메인 화면 '단순 행사 기사 제외'가 켜져 있을 때).",
+                  foreground="#666").grid(row=r + 1, column=1, sticky="w", padx=(10, 0))
+
         def ok():
             self.cfg["source"] = source_var.get()
             self.cfg["use_feeds"] = feeds_var.get()
+            self.cfg["event_words"] = self._lines(ev_text)
             for key, v in vars_.items():
                 self.cfg[key] = v.get().strip()
             config.save(self.cfg)
@@ -636,7 +667,7 @@ class App(tk.Tk):
             self._set_status("설정 저장됨")
 
         btns = ttk.Frame(frm)
-        btns.grid(row=len(fields) + 3, column=0, columnspan=2, sticky="e", pady=(8, 0))
+        btns.grid(row=r + 2, column=0, columnspan=2, sticky="e", pady=(8, 0))
         ttk.Button(btns, text="저장", command=ok).pack(side="left", padx=4)
         ttk.Button(btns, text="취소", command=win.destroy).pack(side="left")
 

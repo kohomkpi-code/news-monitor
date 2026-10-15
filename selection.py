@@ -20,7 +20,7 @@ def build_request(articles: list[Article], today: dt.date | None = None) -> str:
     lines = [f"[AI 선별 요청] {today.isoformat()}, 후보 {len(articles)}건"]
     for i, a in enumerate(articles, 1):
         grade = f"[{a.grade}] " if a.grade else ""
-        line = f"{i}. {grade}{a.title} ({a.source}, {a.published.strftime('%m.%d')})"
+        line = f"{i}. {grade}{a.title} ({a.source_label}, {a.published.strftime('%m.%d')})"
         desc = " ".join(a.description.split())
         if desc:
             line += " — " + desc[:SUMMARY_LEN]

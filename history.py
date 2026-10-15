@@ -45,5 +45,7 @@ def mark_sent(links: list[str]) -> int:
     return added
 
 
-def is_sent(link: str, data: dict[str, str]) -> bool:
-    return link in data
+def is_sent(link: str | list[str], data: dict[str, str]) -> bool:
+    """링크 하나 또는 여러 개(같은 사안으로 묶인 기사들) 중 하나라도 보고했으면 True."""
+    links = [link] if isinstance(link, str) else link
+    return any(l in data for l in links)

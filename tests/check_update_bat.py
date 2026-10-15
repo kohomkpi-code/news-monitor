@@ -4,7 +4,9 @@ GitHub Actions(윈도우)에서 exe 를 만든 뒤 Release 를 올리기 전에 
 상황 재현:
 - 한글과 공백이 든 폴더 (예: 'OneDrive - 공단')
 - 앱(안쪽 프로세스)이 끝난 뒤에도 다른 프로세스(바깥 프로세스 역할)가 4초간 exe 를 붙잡고 있음
-→ 배치 파일이 기다렸다가 결국 새 파일로 바꾸고 update_log.txt 에 OK 를 남기면 통과.
+시험 두 가지:
+1) 새 이름으로 설치: NewsMonitor.exe → NewsMonitor_v9.9.9.exe 가 생기고 옛 파일은 지워져야 함
+2) 같은 이름 덮어쓰기: NewsMonitor_v9.9.9.exe 를 같은 이름의 새 파일로 바꿔야 함
 """
 
 import os
@@ -17,38 +19,48 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import updater  # noqa: E402
 
-folder = os.path.join(tempfile.mkdtemp(), "OneDrive - 공단 시험")
-os.makedirs(folder)
-new = os.path.join(folder, "NewsMonitor.new.exe")
-cur = os.path.join(folder, "NewsMonitor.exe")
-log = os.path.join(folder, "update_log.txt")
-with open(new, "w") as f:
-    f.write("NEW")
-with open(cur, "w") as f:
-    f.write("OLD")
 
-bat = os.path.join(tempfile.gettempdir(), "newsmonitor_update_test.bat")
-with open(bat, "w", encoding="ascii", newline="\r\n") as f:
-    f.write(updater._UPDATE_BAT)
+def run_case(label: str, cur_name: str, target_name: str) -> str:
+    folder = os.path.join(tempfile.mkdtemp(), "OneDrive - 공단 시험")
+    os.makedirs(folder)
+    new = os.path.join(folder, "NewsMonitor.new.exe")
+    cur = os.path.join(folder, cur_name)
+    target = os.path.join(folder, target_name)
+    log = os.path.join(folder, "update_log.txt")
+    with open(new, "w") as f:
+        f.write("NEW")
+    with open(cur, "w") as f:
+        f.write("OLD")
 
-def main():
+    bat = os.path.join(tempfile.gettempdir(), f"newsmonitor_update_test_{label}.bat")
+    with open(bat, "w", encoding="ascii", newline="\r\n") as f:
+        f.write(updater._UPDATE_BAT)
+
     holder = subprocess.Popen([sys.executable, "-c", f"import time; f = open({cur!r}, 'rb'); time.sleep(4)"])
     app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
     time.sleep(0.5)
     started = time.time()
-    cmd = f'cmd /d /s /c ""{bat}" "{new}" "{cur}" {app.pid} "{log}" norun"'
-    r = subprocess.run(cmd, timeout=120, capture_output=True, text=True, errors="replace")
-    print(f"배치 종료코드 {r.returncode}", r.stdout, r.stderr)
+    cmd = f'cmd /d /s /c ""{bat}" "{new}" "{cur}" {app.pid} "{log}" "{target}" norun"'
+    r = subprocess.run(cmd, timeout=150, capture_output=True, text=True, errors="replace")
     holder.wait()
 
-    with open(cur) as f:
+    log_text = open(log).read().strip() if os.path.exists(log) else "(로그 없음)"
+    with open(target) as f:
         content = f.read()
-    log_text = open(log).read() if os.path.exists(log) else "(로그 없음)"
-    print(f"걸린 시간 {time.time() - started:.1f}초 / 로그: {log_text.strip()}")
-    assert content == "NEW", f"교체 실패: {content}"
-    assert not os.path.exists(new), "새 파일이 남아 있음"
-    assert "OK" in log_text, log_text
-    print(f"::notice title=업데이트 교체 시험 통과::{time.time() - started:.1f}초, 로그 {log_text.strip()}, 배치 종료코드 {r.returncode}")
+    assert content == "NEW", f"{label}: 새 파일이 아님 ({content})"
+    assert not os.path.exists(new), f"{label}: 내려받은 파일이 남아 있음"
+    if cur != target:
+        assert not os.path.exists(cur), f"{label}: 옛 exe 가 남아 있음"
+    assert "OK" in log_text, f"{label}: {log_text}"
+    return f"{label} {time.time() - started:.1f}초 [{log_text}] 종료코드 {r.returncode}"
+
+
+def main():
+    results = [
+        run_case("새이름", "NewsMonitor.exe", "NewsMonitor_v9.9.9.exe"),
+        run_case("같은이름", "NewsMonitor_v9.9.9.exe", "NewsMonitor_v9.9.9.exe"),
+    ]
+    print("::notice title=업데이트 교체 시험 통과::" + " / ".join(results))
 
 
 if __name__ == "__main__":

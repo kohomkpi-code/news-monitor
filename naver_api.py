@@ -40,6 +40,17 @@ class Article:
     grade: str = ""      # 키워드 등급: "A"(기관 직접) / "B"(정책·환경)
     category: str = ""   # AI 선정 분류 (예: 리스크, 기관 직접)
     insight: str = ""    # AI 선정 한 줄 인사이트
+    others: list = field(default_factory=list)  # 같은 사안으로 묶인 다른 기사 [(매체, 제목, 링크)]
+
+    @property
+    def source_label(self) -> str:
+        """'충남일보 외 2' 처럼 묶인 기사 수를 붙인 매체명."""
+        return f"{self.source} 외 {len(self.others)}" if self.others else self.source
+
+    @property
+    def all_links(self) -> list[str]:
+        """이 기사와 묶인 기사들의 링크 전부(보고 완료 기록용)."""
+        return [self.link or self.naver_link] + [o[2] for o in self.others if o[2]]
 
     @property
     def date_str(self) -> str:

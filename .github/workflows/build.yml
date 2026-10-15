@@ -62,19 +62,27 @@ jobs:
 
       - name: 변경 내용 뽑기 (CHANGELOG 맨 위 항목)
         if: steps.ver.outputs.exists == 'false'
+        env:
+          PYTHONUTF8: "1"
         run: |
           python - <<'EOF'
           text = open("CHANGELOG.md", encoding="utf-8").read()
           parts = text.split("\n## ")
           top = parts[0] if text.startswith("## ") else "## " + parts[1]
           body = top.split("\n", 1)[1].strip() if "\n" in top else ""
+          import version
+          exe = version.versioned_exe_name(version.__version__)
+          body += (f"\n\n**내려받기: `{exe}`** "
+                   "(`NewsMonitor.exe` 는 v0.3.1 이하의 자동 업데이트용으로 함께 올린 같은 파일)")
           open("release_notes.md", "w", encoding="utf-8").write(body)
           EOF
 
       - name: Release 만들기
         if: steps.ver.outputs.exists == 'false'
         run: |
-          gh release create "${{ steps.ver.outputs.tag }}" dist/NewsMonitor.exe \
+          # 버전 이름 파일(사람이 내려받는 것) + 예전 이름 파일(v0.3.1 이하 자동 업데이트 호환)
+          cp dist/NewsMonitor.exe "dist/NewsMonitor_${{ steps.ver.outputs.tag }}.exe"
+          gh release create "${{ steps.ver.outputs.tag }}" "dist/NewsMonitor_${{ steps.ver.outputs.tag }}.exe" dist/NewsMonitor.exe \
             --repo "$GITHUB_REPOSITORY" \
             --title "${{ steps.ver.outputs.tag }}" \
             --notes-file release_notes.md
