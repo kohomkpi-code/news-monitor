@@ -262,12 +262,17 @@ class App(tk.Tk):
         found: list[Article] = []
         feed_failed: list[str] = []
         try:
+            b_max = int(self.cfg.get("b_max_per_keyword", 50) or 0)
             for i, kw in enumerate(grades, 1):
                 self.after(0, self._set_status, f"{label} 조회 중… ({i}/{len(grades)}) {kw}")
+                is_a = grades[kw] == "A"
                 if source == "naver":
                     arts = naver_api.search_news(kw, self.cfg["client_id"], self.cfg["client_secret"], start, end)
                 else:
-                    arts = google_news.search_news(kw, start, end)
+                    # A 는 빠짐없이(기간 나눠 다시 묻기), B 는 한 번만
+                    arts = google_news.search_news(kw, start, end, split=is_a)
+                if not is_a and b_max > 0:
+                    arts = arts[:b_max]
                 for a in arts:
                     a.grade = grades[kw]
                 found.extend(arts)
@@ -283,6 +288,11 @@ class App(tk.Tk):
             return
 
         raw_count = len(found)
+        # B 키워드로 찾았어도 제목·요약에 A 키워드(주택관리공단 등)가 있으면 A 로 올린다
+        a_keywords = [k for k, g in grades.items() if g == "A"]
+        for a in found:
+            if a.grade != "A" and any(feeds.keyword_matches(k, f"{a.title} {a.description}") for k in a_keywords):
+                a.grade = "A"
         # 제외어는 B 에만 적용한다(A 는 '무조건 포함').
         found = [a for a in found if a.grade == "A"] + dedup.apply_exclude(
             [a for a in found if a.grade != "A"], self.cfg.get("exclude_words", []))
@@ -319,7 +329,7 @@ class App(tk.Tk):
                 art.date_str, art.source_label, art.title))
             self.art_by_iid[iid] = art
             self.checked[iid] = True
-        self._sort_by("grade", reverse=False)  # 기본: A 가 위, 그 안에서 최신순
+        self._sort_by("grade", reverse=False)  # 기본: A 가 위 → 키워드 우선순위 → 최신순
         self._refresh_pick_box()
 
         n_a = sum(1 for a in found if a.grade == "A")
@@ -363,7 +373,8 @@ class App(tk.Tk):
 
     def _sort_key(self, col: str):
         if col == "grade":
-            return lambda a: a.grade or "Z"
+            # 등급 → 그 안에서는 키워드 우선순위(키워드 칸에 적힌 순서)
+            return lambda a: (a.grade or "Z", min((self._keyword_rank(k) for k in a.keywords), default=10 ** 6))
         if col == "category":
             order = report.CATEGORY_ORDER
             return lambda a: (order.index(a.category) if a.category in order
@@ -632,6 +643,7 @@ class App(tk.Tk):
             ("네이버 Client ID", "client_id", False),
             ("네이버 Client Secret", "client_secret", True),
             ("메일 제목 ({날짜}→261015)", "mail_subject", False),
+            ("B 키워드당 최대 건수", "b_max_per_keyword", False),
             ("보고서 제목", "report_title", False),
         ]
         vars_: dict[str, tk.StringVar] = {}
@@ -665,6 +677,10 @@ class App(tk.Tk):
             self.cfg["event_words"] = self._lines(ev_text)
             for key, v in vars_.items():
                 self.cfg[key] = v.get().strip()
+            try:
+                self.cfg["b_max_per_keyword"] = max(0, int(self.cfg["b_max_per_keyword"]))
+            except ValueError:
+                self.cfg["b_max_per_keyword"] = 50
             config.save(self.cfg)
             win.destroy()
             self._set_status("설정 저장됨")

@@ -4,6 +4,8 @@
 - 네이버 Client ID/Secret 은 이 파일에만 저장되고 GitHub 에는 올라가지 않는다(.gitignore).
 - source: 기사 출처. "google"(구글 뉴스, 키 불필요) 또는 "naver"(네이버, 키 필요).
 - keywords_a(기관 직접, 무조건 후보) / keywords_b(정책·환경, 후보) 두 등급으로 나눈다.
+  B 는 담당자가 수기로 검색하던 목록이고, 적힌 순서가 우선순위다(표 정렬·AI 요청문 순서).
+  B 키워드로 찾은 기사라도 제목·요약에 A 키워드가 있으면 A 로 올린다.
   예전 "keywords" 는 두 목록을 합친 값으로 자동으로 맞춘다(하위 호환).
 - extra_feeds: 전문지 RSS 주소 목록. 주소가 바뀌면 여기만 고친다.
 - event_words: 단순 행사 기사를 거르는 단어(제목에 있으면 A 등급이라도 뺀다). [설정]에서 고친다.
@@ -17,15 +19,15 @@ DEFAULT_CONFIG = {
     "source": "google",        # google | naver
     "client_id": "",
     "client_secret": "",
-    "keywords_a": ["주택관리공단", "KOHOM", "주택관리공단 지사", "주택관리공단 사장"],
+    "keywords_version": 2,     # 기본 키워드 목록이 바뀌면 올린다(옛 목록을 새 기본값으로 교체)
+    "keywords_a": ["주택관리공단"],
     "keywords_b": [
-        "LH 임대주택", "LH 조직개편", "LH 노조", "LH 사장", "국토부 주거복지", "국토위 국정감사",
-        "공공임대주택", "영구임대", "국민임대", "행복주택", "임대주택 부정입주", "임대주택 빈집",
-        "주거급여", "주거복지사", "주거상향", "공동주택관리법", "공공주택특별법", "공동주택 관리비",
-        "승강기 안전", "스프링클러 공동주택", "층간소음", "관리직원 폭언", "고독사", "돌봄통합법",
-        "에너지바우처", "군 주거시설", "군 관사", "소규모 공동주택 안전점검", "중대재해처벌법 공공기관",
-        "공공기관 경영평가", "공공기관 청렴도", "공공기관 채용비리", "공공기관 경영공시",
+        "주택관리", "LH", "한국토지주택공사", "공기업", "공공기관", "국토교통부", "국토교통위원회",
+        "공정거래위원회", "동반성장", "국정감사", "경영평가", "주거복지", "SH공사", "도시공사",
+        "기획재정부", "재정경제부", "기획예산처", "감사원", "거버넌스", "재정건전성", "부채비율",
+        "영구임대", "임대아파트", "아파트 관리비", "취약계층", "임차인",
     ],
+    "b_max_per_keyword": 50,   # B 키워드 하나당 최대 건수(구글이 주는 순서대로). A 는 제한 없음
     "keywords": [],            # keywords_a + keywords_b (자동)
     "exclude_words": ["분양", "청약", "시세", "투자", "주식", "매매", "전세사기 피해지원 신청"],
     "exclude_events": True,    # 단순 행사 기사 제외 (A 등급에도 적용)
@@ -71,6 +73,10 @@ def load() -> dict:
         # v0.3.0 이전 설정 파일: 키워드·제외어·기간·보고서 제목은 새 기본값을 쓰고
         # 출처·네이버 키·체크 옵션 같은 나머지는 그대로 살린다.
         for key in ("keywords", "exclude_words", "days_back", "report_title"):
+            saved.pop(key, None)
+    if saved and saved.get("keywords_version", 1) < DEFAULT_CONFIG["keywords_version"]:
+        # 기본 키워드 목록이 바뀜(v0.5.0: 담당자 수기 검색 목록) → A·B 를 새 기본값으로
+        for key in ("keywords_a", "keywords_b", "keywords", "keywords_version"):
             saved.pop(key, None)
     cfg.update(saved)
     cfg["keywords"] = all_keywords(cfg)

@@ -4,7 +4,8 @@
 - 주소: https://news.google.com/rss/search?q=키워드 after:날짜 before:날짜&hl=ko&gl=KR&ceid=KR:ko
 - 돌려받는 것은 JSON 이 아니라 RSS(XML). 기사 하나가 <item> 하나다.
 - 제목 끝에 " - 매체명"이 붙어 오므로 떼고, 매체명은 <source> 에서 가져온다.
-- 한 번에 최대 100건 정도만 준다. 100건이 꽉 차면 기간을 반으로 나눠 다시 묻는다.
+- 한 번에 최대 100건 정도만 준다. 빠짐없이 받아야 할 때(A 등급)는 100건이 꽉 차면
+  기간을 반으로 나눠 다시 묻는다. B 등급은 한 번만 묻는다(요청 수·건수 줄이기).
 - 결과는 네이버와 같은 Article 형태로 돌려주므로 중복제거·보고서는 그대로 쓴다.
 - RSS 의 기사 링크는 구글을 거치는 주소(news.google.com/rss/articles/…)다.
   보고서에 넣을 기사만 resolve_links()로 언론사 원문 주소로 바꾼다(요청 수를 줄이려고).
@@ -82,19 +83,20 @@ def _fetch(keyword: str, start_date: dt.date, end_date: dt.date) -> list[Article
     return parse_rss(resp.content, keyword)
 
 
-def _search_range(keyword: str, start_date: dt.date, end_date: dt.date, depth: int) -> list[Article]:
+def _search_range(keyword: str, start_date: dt.date, end_date: dt.date, depth: int,
+                  split: bool = True) -> list[Article]:
     items = _fetch(keyword, start_date, end_date)
-    if len(items) >= PAGE_LIMIT and start_date < end_date and depth < MAX_SPLIT_DEPTH:
+    if split and len(items) >= PAGE_LIMIT and start_date < end_date and depth < MAX_SPLIT_DEPTH:
         mid = start_date + (end_date - start_date) // 2
         return (_search_range(keyword, start_date, mid, depth + 1)
                 + _search_range(keyword, mid + dt.timedelta(days=1), end_date, depth + 1))
     return items
 
 
-def search_news(keyword: str, start_date: dt.date, end_date: dt.date) -> list[Article]:
-    """키워드 하나로 기간(한국시간 기준) 내 기사를 가져온다."""
+def search_news(keyword: str, start_date: dt.date, end_date: dt.date, split: bool = True) -> list[Article]:
+    """키워드 하나로 기간(한국시간 기준) 내 기사를 가져온다. split=False 면 한 번만 묻는다."""
     results, seen = [], set()
-    for art in _search_range(keyword, start_date, end_date, 0):
+    for art in _search_range(keyword, start_date, end_date, 0, split):
         if not (start_date <= art.published.date() <= end_date):
             continue
         if art.link in seen:  # 기간을 나눠 물으면 경계에서 겹칠 수 있다
