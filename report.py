@@ -6,6 +6,7 @@
   → 편지쓰기 본문에 Ctrl+V 하면 제목에 걸린 링크가 그대로 유지된다.
 복사는 브라우저가 '드래그해서 Ctrl+C' 하는 것과 같은 방식으로 한다(서식·링크 유지).
 그룹웨어 편집기는 CSS 를 일부 버리므로 모든 꾸밈은 인라인 style 로만 쓴다.
+본문 글자 크기는 공단 메일 양식에 맞춰 16px(편집기 '크기' 16), 매체·인사이트는 13px.
 
 AI 선정 결과(분류·인사이트)가 하나라도 있으면 키워드별 대신 분류별로 묶고,
 제목 아래 줄에 '▸ 인사이트'를 단다. 없으면 예전처럼 키워드별로 묶는다.
@@ -50,7 +51,7 @@ def build_simple_html(articles: list[Article]) -> str:
         f'style="color:#1a4b8f;text-decoration:none">{esc(a.title)}</a></p>'
         for a in articles
     ]
-    return ('<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:12pt;line-height:1.6">'
+    return ('<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:16px;line-height:1.6">'
             + "".join(lines) + "</div>")
 
 
@@ -77,8 +78,8 @@ def build_html(
         groups.setdefault(key, []).append(art)
 
     parts = [
-        '<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:11pt;color:#222;line-height:1.6">',
-        f'<p style="font-size:14pt;font-weight:bold;margin:0 0 4px 0">{esc(title)} ({esc(period)})</p>',
+        '<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:16px;color:#222;line-height:1.6">',
+        f'<p style="font-size:20px;font-weight:bold;margin:0 0 4px 0">{esc(title)} ({esc(period)})</p>',
         f'<p style="margin:0 0 12px 0;color:#555">총 {len(articles)}건 · 제목을 클릭하면 기사로 연결됩니다.</p>',
     ]
 
@@ -99,7 +100,7 @@ def build_html(
             parts.append(
                 f'<li style="margin:0 0 3px 0">'
                 f'<a href="{esc(art.link or art.naver_link)}" style="color:#1a4b8f;text-decoration:none">{esc(art.title)}</a>'
-                f' <span style="color:#777;font-size:10pt">({esc(art.source_label)}, {art.published.strftime("%m.%d")})</span>'
+                f' <span style="color:#777;font-size:13px">({esc(art.source_label)}, {art.published.strftime("%m.%d")})</span>'
                 f'{extra}</li>'
             )
         parts.append("</ul>")
@@ -115,7 +116,7 @@ def _item_html(art: Article, extra: str = "") -> str:
     esc = html.escape
     return (
         f'<a href="{esc(art.link or art.naver_link)}" style="color:#1a4b8f;text-decoration:none">{esc(art.title)}</a>'
-        f' <span style="color:#777;font-size:10pt">({esc(art.source_label)}, {art.published.strftime("%m.%d")})</span>'
+        f' <span style="color:#777;font-size:13px">({esc(art.source_label)}, {art.published.strftime("%m.%d")})</span>'
         f'{extra}'
     )
 
@@ -128,8 +129,8 @@ def _build_by_category(articles: list[Article], title: str, period: str) -> str:
         groups.setdefault(art.category or "참고", []).append(art)
 
     parts = [
-        '<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:11pt;color:#222;line-height:1.6">',
-        f'<p style="font-size:14pt;font-weight:bold;margin:0 0 12px 0">{esc(title)} ({esc(period)}) · 총 {len(articles)}건 선정</p>',
+        '<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:16px;color:#222;line-height:1.6">',
+        f'<p style="font-size:20px;font-weight:bold;margin:0 0 12px 0">{esc(title)} ({esc(period)}) · 총 {len(articles)}건 선정</p>',
     ]
     for cat, items in groups.items():
         if not items:
@@ -139,7 +140,7 @@ def _build_by_category(articles: list[Article], title: str, period: str) -> str:
         for art in items:
             insight = ""
             if art.insight:
-                insight = f'<br><span style="color:#777;font-size:10pt">▸ {esc(art.insight)}</span>'
+                insight = f'<br><span style="color:#777;font-size:13px">▸ {esc(art.insight)}</span>'
             parts.append(f'<li style="margin:0 0 6px 0">{_item_html(art)}{insight}</li>')
         parts.append("</ul>")
     parts.append("</div>")
