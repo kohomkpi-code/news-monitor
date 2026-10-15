@@ -2,6 +2,7 @@
 
 - 설정 파일은 exe(또는 app.py)와 같은 폴더에 생긴다.
 - 네이버 Client ID/Secret 은 이 파일에만 저장되고 GitHub 에는 올라가지 않는다(.gitignore).
+- source: 기사 출처. "google"(구글 뉴스, 키 불필요) 또는 "naver"(네이버, 키 필요).
 """
 
 import json
@@ -9,6 +10,7 @@ import os
 import sys
 
 DEFAULT_CONFIG = {
+    "source": "google",        # google | naver
     "client_id": "",
     "client_secret": "",
     "keywords": ["주택관리공단", "임대주택 관리", "공공임대 유지보수"],

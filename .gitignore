@@ -1,0 +1,11 @@
+# 개인 설정·기록 (API 키가 들어 있으므로 절대 올리지 않음)
+config.json
+sent_history.json
+reports/
+
+# 빌드 부산물
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc

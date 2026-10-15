@@ -13,15 +13,18 @@ from tkinter import messagebox, ttk
 
 import config
 import dedup
+import google_news
 import history
+import naver_api
 import report
 import updater
-from naver_api import Article, NaverApiError, search_news
+from naver_api import Article, NaverApiError
 from version import APP_TITLE, __version__
 
 FONT = ("맑은 고딕", 10)
 FONT_BOLD = ("맑은 고딕", 10, "bold")
 CHECK_ON, CHECK_OFF = "☑", "☐"
+SOURCE_LABELS = {"google": "구글 뉴스", "naver": "네이버"}
 
 
 def parse_date(text: str) -> dt.date:
@@ -177,8 +180,9 @@ class App(tk.Tk):
         if not keywords:
             messagebox.showwarning("키워드 확인", "검색 키워드를 한 개 이상 입력하세요.")
             return
-        if not self.cfg.get("client_id") or not self.cfg.get("client_secret"):
-            messagebox.showwarning("설정 필요", "네이버 Client ID / Secret 을 먼저 [설정]에서 입력하세요.")
+        if self._source() == "naver" and (not self.cfg.get("client_id") or not self.cfg.get("client_secret")):
+            messagebox.showwarning("설정 필요", "네이버 Client ID / Secret 을 먼저 [설정]에서 입력하세요.\n"
+                                   "키가 없으면 [설정]에서 '구글 뉴스 (키 불필요)'를 고르세요.")
             self._open_settings()
             return
 
@@ -187,12 +191,20 @@ class App(tk.Tk):
         self._clear_tree()
         threading.Thread(target=self._search_worker, args=(keywords, start, end), daemon=True).start()
 
+    def _source(self) -> str:
+        return self.cfg.get("source") if self.cfg.get("source") in SOURCE_LABELS else "google"
+
     def _search_worker(self, keywords: list[str], start: dt.date, end: dt.date):
+        source = self._source()
+        label = SOURCE_LABELS[source]
         found: list[Article] = []
         try:
             for i, kw in enumerate(keywords, 1):
-                self.after(0, self._set_status, f"조회 중… ({i}/{len(keywords)}) {kw}")
-                found.extend(search_news(kw, self.cfg["client_id"], self.cfg["client_secret"], start, end))
+                self.after(0, self._set_status, f"{label} 조회 중… ({i}/{len(keywords)}) {kw}")
+                if source == "naver":
+                    found.extend(naver_api.search_news(kw, self.cfg["client_id"], self.cfg["client_secret"], start, end))
+                else:
+                    found.extend(google_news.search_news(kw, start, end))
         except NaverApiError as e:
             self.after(0, self._search_failed, str(e))
             return
@@ -228,7 +240,7 @@ class App(tk.Tk):
                 tags=("odd",) if i % 2 else ())
             self.checked[iid] = True
         self._set_status(
-            f"수집 {raw_count}건 → 중복·제외어 정리 후 {len(found) + sent_skipped}건"
+            f"[{SOURCE_LABELS[self._source()]}] 수집 {raw_count}건 → 중복·제외어 정리 후 {len(found) + sent_skipped}건"
             + (f" → 기보고 {sent_skipped}건 제외 → " if sent_skipped else " → ")
             + f"표시 {len(found)}건"
         )
@@ -311,23 +323,35 @@ class App(tk.Tk):
 
         frm = ttk.Frame(win, padding=14)
         frm.pack()
+
+        # 맨 위: 기사 출처 선택
+        source_var = tk.StringVar(value=self._source())
+        src_frm = ttk.Frame(frm)
+        src_frm.grid(row=0, column=1, sticky="w", pady=4, padx=(10, 0))
+        ttk.Label(frm, text="기사 출처").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Radiobutton(src_frm, text="구글 뉴스 (키 불필요)", value="google",
+                        variable=source_var).pack(side="left")
+        ttk.Radiobutton(src_frm, text="네이버 (키 필요)", value="naver",
+                        variable=source_var).pack(side="left", padx=(14, 0))
+
         fields = [
             ("네이버 Client ID", "client_id", False),
             ("네이버 Client Secret", "client_secret", True),
             ("보고서 제목", "report_title", False),
         ]
         vars_: dict[str, tk.StringVar] = {}
-        for r, (label, key, secret) in enumerate(fields):
+        for r, (label, key, secret) in enumerate(fields, 1):
             ttk.Label(frm, text=label).grid(row=r, column=0, sticky="w", pady=4)
             v = tk.StringVar(value=self.cfg.get(key, ""))
             vars_[key] = v
             ttk.Entry(frm, textvariable=v, width=44, show="*" if secret else "").grid(row=r, column=1, pady=4, padx=(10, 0))
 
-        ttk.Label(frm, text="Client ID/Secret 은 developers.naver.com → 내 애플리케이션에서 확인합니다.\n"
+        ttk.Label(frm, text="네이버 Client ID/Secret 은 '네이버'를 고를 때만 필요합니다.\n"
                             "이 값은 이 PC 의 config.json 에만 저장됩니다.",
-                  foreground="#666").grid(row=len(fields), column=0, columnspan=2, sticky="w", pady=(8, 4))
+                  foreground="#666").grid(row=len(fields) + 1, column=0, columnspan=2, sticky="w", pady=(8, 4))
 
         def ok():
+            self.cfg["source"] = source_var.get()
             for key, v in vars_.items():
                 self.cfg[key] = v.get().strip()
             config.save(self.cfg)
@@ -335,7 +359,7 @@ class App(tk.Tk):
             self._set_status("설정 저장됨")
 
         btns = ttk.Frame(frm)
-        btns.grid(row=len(fields) + 1, column=0, columnspan=2, sticky="e", pady=(8, 0))
+        btns.grid(row=len(fields) + 2, column=0, columnspan=2, sticky="e", pady=(8, 0))
         ttk.Button(btns, text="저장", command=ok).pack(side="left", padx=4)
         ttk.Button(btns, text="취소", command=win.destroy).pack(side="left")
 

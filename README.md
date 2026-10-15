@@ -1,6 +1,6 @@
 # 언론보도 모니터링 (NewsMonitor)
 
-네이버 뉴스에서 키워드별 기사를 모아 중복을 정리하고, 사내메일에 붙여넣을 수 있는
+구글 뉴스(기본, 키 불필요) 또는 네이버 뉴스에서 키워드별 기사를 모아 중복을 정리하고, 사내메일에 붙여넣을 수 있는
 HTML 보고서(제목에 링크)를 만드는 PC 프로그램입니다.
 
 ## 설치 (처음 한 번)
@@ -9,8 +9,8 @@ HTML 보고서(제목에 링크)를 만드는 PC 프로그램입니다.
 2. 적당한 폴더(예: `C:\NewsMonitor\`)에 넣고 실행합니다.
    - 윈도우가 "알 수 없는 게시자" 경고를 띄우면 **추가 정보 → 실행** 을 누르세요(서명 없는 프로그램이라 뜨는 안내입니다).
    - exe 옆에 `config.json`, `sent_history.json`, `reports\` 가 자동으로 생깁니다. 이 폴더 안에서 모든 것이 관리됩니다.
-3. **[설정]** 버튼 → 네이버 Client ID / Client Secret 입력 → 저장
-   - developers.naver.com → 내 애플리케이션 → 등록한 앱에서 확인
+3. 기본 출처는 **구글 뉴스**라 설정 없이 바로 **조회** 할 수 있습니다.
+   - 네이버를 쓰려면 **[설정]** → '네이버 (키 필요)' 선택 → Client ID / Client Secret 입력 → 저장
 
 ## 매일 사용 흐름
 
@@ -33,6 +33,7 @@ HTML 보고서(제목에 링크)를 만드는 PC 프로그램입니다.
 | 파일 | 역할 |
 |---|---|
 | `app.py` | 화면(GUI). 버튼·표·설정창 |
+| `google_news.py` | 구글 뉴스 RSS 조회 (키 불필요) |
 | `naver_api.py` | 네이버 뉴스 검색 API 호출 |
 | `dedup.py` | 중복·유사 기사 제거, 제외어 |
 | `report.py` | 메일용 HTML 보고서 생성 |
@@ -47,4 +48,4 @@ HTML 보고서(제목에 링크)를 만드는 PC 프로그램입니다.
 ## 보안 메모
 
 - 네이버 API 키는 이 PC 의 `config.json` 에만 저장되며 GitHub 에는 올라가지 않습니다(`.gitignore`).
-- 프로그램은 네이버 API(`openapi.naver.com`)와 GitHub(`api.github.com`, `github.com`) 두 곳에만 접속합니다.
+- 프로그램은 구글 뉴스(`news.google.com`), 네이버 API(`openapi.naver.com`, 네이버 선택 시), GitHub(`api.github.com`, `github.com`)에만 접속합니다.

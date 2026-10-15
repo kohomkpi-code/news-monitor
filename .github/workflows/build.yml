@@ -1,0 +1,74 @@
+# main 에 push 되면 윈도우 가상 PC 에서 NewsMonitor.exe 를 만들어
+# version.py 의 버전(v0.2.0 등)으로 Release 를 만들고 exe 를 첨부한다.
+# 같은 버전의 Release 가 이미 있으면 아무것도 하지 않는다(버전 숫자를 올려야 새 배포).
+
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 버전 읽기
+        id: ver
+        run: |
+          VER=$(python -c "import version; print(version.__version__)")
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VER" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v$VER Release 가 이미 있어 빌드를 건너뜁니다."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.ver.outputs.exists == 'false'
+        with:
+          python-version: "3.12"
+
+      - name: 부품 설치
+        if: steps.ver.outputs.exists == 'false'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: 모듈 확인
+        if: steps.ver.outputs.exists == 'false'
+        run: python -m py_compile *.py
+
+      - name: exe 만들기
+        if: steps.ver.outputs.exists == 'false'
+        run: pyinstaller --onefile --windowed --name NewsMonitor app.py
+
+      - name: 변경 내용 뽑기 (CHANGELOG 맨 위 항목)
+        if: steps.ver.outputs.exists == 'false'
+        run: |
+          python - <<'EOF'
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          parts = text.split("\n## ")
+          top = parts[0] if text.startswith("## ") else "## " + parts[1]
+          body = top.split("\n", 1)[1].strip() if "\n" in top else ""
+          open("release_notes.md", "w", encoding="utf-8").write(body)
+          EOF
+
+      - name: Release 만들기
+        if: steps.ver.outputs.exists == 'false'
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" dist/NewsMonitor.exe \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "${{ steps.ver.outputs.tag }}" \
+            --notes-file release_notes.md
