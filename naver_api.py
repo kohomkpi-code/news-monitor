@@ -37,6 +37,9 @@ class Article:
     published: dt.datetime
     description: str
     keywords: list = field(default_factory=list)  # 이 기사를 찾아낸 키워드들
+    grade: str = ""      # 키워드 등급: "A"(기관 직접) / "B"(정책·환경)
+    category: str = ""   # AI 선정 분류 (예: 리스크, 기관 직접)
+    insight: str = ""    # AI 선정 한 줄 인사이트
 
     @property
     def date_str(self) -> str:

@@ -15,14 +15,13 @@ import base64
 import datetime as dt
 import json
 import re
-import xml.etree.ElementTree as ET
 
 import requests
 
-from naver_api import Article, NaverApiError, clean_text, parse_pubdate
+import rss
+from naver_api import Article, NaverApiError
 
 RSS_URL = "https://news.google.com/rss/search"
-KST = dt.timezone(dt.timedelta(hours=9))
 PAGE_LIMIT = 100      # 구글이 한 번에 주는 최대 건수(대략)
 MAX_SPLIT_DEPTH = 4   # 기간 나누기는 최대 4번까지(요청이 너무 많아지지 않게)
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NewsMonitor"}
@@ -46,36 +45,22 @@ def build_query(keyword: str, start_date: dt.date, end_date: dt.date) -> str:
 
 def parse_rss(xml_text: str | bytes, keyword: str) -> list[Article]:
     """RSS 문서를 Article 목록으로 바꾼다(기간 필터 전)."""
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
-        raise NaverApiError(f"구글 뉴스 응답을 읽을 수 없습니다: {e}") from e
-
     out: list[Article] = []
-    for item in root.iter("item"):
-        title = clean_text(item.findtext("title") or "")
-        link = (item.findtext("link") or "").strip()
-        source = clean_text(item.findtext("source") or "")
-        pub = item.findtext("pubDate")
-        if not title or not link or not pub:
-            continue
-        try:
-            published = parse_pubdate(pub).astimezone(KST)
-        except (TypeError, ValueError):
-            continue
-
+    for it in rss.parse_items(xml_text, "구글 뉴스"):
+        title, source = it.title, it.source
         if source and title.endswith(" - " + source):
             title = title[: -len(" - " + source)].rstrip()
         elif not source and " - " in title:
             title, source = (s.strip() for s in title.rsplit(" - ", 1))
-
+        # 구글의 요약은 '제목 + 매체명'뿐이라 쓸모가 없어 비운다
+        desc = "" if it.description.startswith(title[:15]) else it.description
         out.append(Article(
             title=title,
-            link=link,
+            link=it.link,
             naver_link="",
             source=source,
-            published=published,
-            description=clean_text(item.findtext("description") or ""),
+            published=it.published,
+            description=desc,
             keywords=[keyword],
         ))
     return out

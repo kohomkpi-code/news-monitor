@@ -3,6 +3,9 @@
 브라우저에서 열어 전체 선택(Ctrl+A) → 복사(Ctrl+C) → 그룹웨어 편지쓰기에
 붙여넣기(Ctrl+V) 하면 제목에 걸린 링크가 그대로 유지된다.
 그룹웨어 편집기는 CSS 를 일부 버리므로 모든 꾸밈은 인라인 style 로만 쓴다.
+
+AI 선정 결과(분류·인사이트)가 하나라도 있으면 키워드별 대신 분류별로 묶고,
+제목 아래 줄에 '▸ 인사이트'를 단다. 없으면 예전처럼 키워드별로 묶는다.
 """
 
 import datetime as dt
@@ -15,6 +18,7 @@ from naver_api import Article
 REPORT_DIR = os.path.join(app_dir(), "reports")
 
 WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
+CATEGORY_ORDER = ["리스크", "기관 직접", "모회사·부처", "정책·제도", "공공기관 공통", "업계·환경", "참고"]
 
 
 def _md(d: dt.date) -> str:
@@ -30,6 +34,8 @@ def build_html(
 ) -> str:
     esc = html.escape
     period = _md(start_date) if start_date == end_date else f"{_md(start_date)} ~ {_md(end_date)}"
+    if any(a.category or a.insight for a in articles):
+        return _build_by_category(articles, title, period)
 
     # 키워드 순서대로 묶기 (기사는 첫 번째 키워드 아래에만 넣는다)
     groups: dict[str, list[Article]] = {k: [] for k in keywords}
@@ -68,6 +74,41 @@ def build_html(
     if no == 0:
         parts.append('<p style="color:#777">해당 기간에 조회된 기사가 없습니다.</p>')
 
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _item_html(art: Article, extra: str = "") -> str:
+    esc = html.escape
+    return (
+        f'<a href="{esc(art.link or art.naver_link)}" style="color:#1a4b8f;text-decoration:none">{esc(art.title)}</a>'
+        f' <span style="color:#777;font-size:10pt">({esc(art.source)}, {art.published.strftime("%m.%d")})</span>'
+        f'{extra}'
+    )
+
+
+def _build_by_category(articles: list[Article], title: str, period: str) -> str:
+    """AI 선정 결과가 있을 때: 분류별 묶음 + 제목 아래 인사이트."""
+    esc = html.escape
+    groups: dict[str, list[Article]] = {c: [] for c in CATEGORY_ORDER}
+    for art in articles:
+        groups.setdefault(art.category or "참고", []).append(art)
+
+    parts = [
+        '<div style="font-family:\'맑은 고딕\',Malgun Gothic,sans-serif;font-size:11pt;color:#222;line-height:1.6">',
+        f'<p style="font-size:14pt;font-weight:bold;margin:0 0 12px 0">{esc(title)} ({esc(period)}) · 총 {len(articles)}건 선정</p>',
+    ]
+    for cat, items in groups.items():
+        if not items:
+            continue
+        parts.append(f'<p style="margin:14px 0 4px 0;font-weight:bold;color:#1F3B5C">■ {esc(cat)}</p>')
+        parts.append('<ul style="margin:0 0 0 18px;padding:0">')
+        for art in items:
+            insight = ""
+            if art.insight:
+                insight = f'<br><span style="color:#777;font-size:10pt">▸ {esc(art.insight)}</span>'
+            parts.append(f'<li style="margin:0 0 6px 0">{_item_html(art)}{insight}</li>')
+        parts.append("</ul>")
     parts.append("</div>")
     return "\n".join(parts)
 

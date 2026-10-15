@@ -57,6 +57,8 @@ def dedupe(
             for k in art.keywords:
                 if k not in dup.keywords:
                     dup.keywords.append(k)
+            if art.grade == "A":  # A·B 모두에 걸리면 A
+                dup.grade = "A"
             continue
 
         by_link[key_link] = art
