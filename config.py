@@ -44,6 +44,7 @@ DEFAULT_CONFIG = {
     "merge_similar": True,     # 제목이 거의 같은 기사 묶기
     "similar_threshold": 0.85, # 유사 제목 판정 기준 (0~1)
     "report_title": "언론보도 모니터링(임원용)",
+    "mail_subject": "({날짜})언론보도",  # {날짜} → 261015 (보고서를 연 날)
 }
 
 

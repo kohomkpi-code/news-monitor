@@ -586,7 +586,9 @@ class App(tk.Tk):
         end = parse_date(self.end_var.get())
         body = report.build_html(report_items, self.cfg["keywords"], start, end,
                                  self.cfg.get("report_title", "언론보도 모니터링"))
-        path = report.save_report(body)
+        simple = report.build_simple_html(report.ordered_for_mail(report_items, self.cfg["keywords"]))
+        subject = report.mail_subject(self.cfg.get("mail_subject", report.DEFAULT_SUBJECT), dt.date.today())
+        path = report.save_report(body, subject=subject, simple_html=simple)
         webbrowser.open("file:///" + path.replace("\\", "/"))
         self._set_status(f"보고서 저장: {path}" + (f" (원문 주소 못 찾은 {failed}건은 구글 경유)" if failed else ""))
 
@@ -629,6 +631,7 @@ class App(tk.Tk):
         fields = [
             ("네이버 Client ID", "client_id", False),
             ("네이버 Client Secret", "client_secret", True),
+            ("메일 제목 ({날짜}→261015)", "mail_subject", False),
             ("보고서 제목", "report_title", False),
         ]
         vars_: dict[str, tk.StringVar] = {}
