@@ -17,7 +17,7 @@ import theme
 from naver_api import Article
 from report import CATEGORY_ORDER
 
-GRADE_ORDER = {"직접": 0, "A": 1, "S": 2, "B": 3}
+GRADE_ORDER = {"직접": 0, "A": 1, "A?": 2, "S": 3, "B": 4, "전문지": 5}
 
 # 열 id → (머리글, 폭, 가운데 정렬, 늘어남)  — 명세 5장 열 폭
 COLUMN_DEFS = {

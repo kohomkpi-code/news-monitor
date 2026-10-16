@@ -112,15 +112,15 @@ def check_feed(name: str, url: str) -> str:
 
 
 def filter_items(items: list[rss.RssItem], feed_name: str, grades: dict[str, str],
-                 start_date: dt.date, end_date: dt.date) -> list[Article]:
-    """기간 안이고 키워드가 맞는 기사만 Article 로. grades = {키워드: "A" 또는 "B"}."""
+                 start_date: dt.date, end_date: dt.date, keep_all: bool = False) -> list[Article]:
+    """기간 안이고 키워드가 맞는 기사만 Article 로. grades = {키워드: 등급}. keep_all 이면 키워드 없어도(면제 전문지)."""
     out: list[Article] = []
     for it in items:
         if not (start_date <= it.published.date() <= end_date):
             continue
         text = f"{it.title} {it.description}"
         matched = [kw for kw in grades if keyword_matches(kw, text)]
-        if not matched:
+        if not matched and not keep_all:
             continue
         out.append(Article(
             title=it.title,
@@ -130,14 +130,14 @@ def filter_items(items: list[rss.RssItem], feed_name: str, grades: dict[str, str
             published=it.published,
             description=it.description,
             keywords=matched,
-            grade=next((g for g in ("A", "S", "B") if any(grades[k] == g for k in matched)), "B"),
+            grade=next((g for g in ("A", "S", "B") if any(grades[k] == g for k in matched)), "전문지"),
         ))
     return out
 
 
 def search_feeds(feeds: list[dict], grades: dict[str, str],
-                 start_date: dt.date, end_date: dt.date) -> tuple[list[Article], list[str]]:
-    """(기사 목록, 실패한 매체 이름 목록)."""
+                 start_date: dt.date, end_date: dt.date, free: list[str] | None = None) -> tuple[list[Article], list[str]]:
+    """(기사 목록, 실패한 매체 이름 목록). free = 키워드 면제 전문지 이름들(그 매체 RSS 는 기간 안 기사 전부)."""
     found: list[Article] = []
     failed: list[str] = []
     for feed in feeds:
@@ -145,7 +145,8 @@ def search_feeds(feeds: list[dict], grades: dict[str, str],
         if not url or not feed.get("on", True):  # 꺼 둔 매체는 건너뜀
             continue
         try:
-            found.extend(filter_items(fetch_feed(name, url), name or url, grades, start_date, end_date))
+            is_free = any(m and m in name for m in (free or []))
+            found.extend(filter_items(fetch_feed(name, url), name or url, grades, start_date, end_date, keep_all=is_free))
         except NaverApiError:
             failed.append(name or url)
     return found, failed

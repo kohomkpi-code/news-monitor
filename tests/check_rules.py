@@ -5,6 +5,7 @@
 - 1부: 10-16 14:00 조회 검토 지시서(v1.0.0). 14:54 검토로 규칙이 바뀐 항목은 기대값을 새 규칙에 맞춤(표시 '※').
 - 2부: 10-16 14:54 조회 검토 지시서(v1.0.2)의 실제 제목 12개와 베스트 5.
 - 3부: 15:10 추가 지시(v1.0.1) — 매칭·제외 매체·약칭, 저장된 규칙 갱신.
+- 4부: 기발송 메일 76건 백테스트 지시(v1.0.3) — 키워드 면제 전문지, 지사명만(A?), 가중치.
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,9 +32,14 @@ def art(title, hours=30, others=0, desc="", source="테스트일보"):
 def judge(a, rr=r):
     """조회 단계와 같게: 제목 검증 → 등급 → 점수. 빠지면 None."""
     kh = ranking.keyword_hits(a, rr)
-    if not (kh["A"] + kh["S"] + kh["B"]):
+    if kh["A"] + kh["S"] + kh["B"]:
+        a.grade = "A" if kh["A"] else "S" if kh["S"] else "B"
+    elif kh["A?"]:
+        a.grade = "A?"
+    elif any(m in a.source for m in rr["specialist_free_press"]):
+        a.grade = "전문지"
+    else:
         return None
-    a.grade = "A" if kh["A"] else "S" if kh["S"] else "B"
     ranking.evaluate(a, rr, now)
     return a
 
@@ -61,7 +67,7 @@ P1 = [
     ("박지효 송파구의원 '노후 빌라·다세대주택 주거환경 개선 지원해야'", lambda a: a is None, "검증 실패로 빠짐"),
     ("파기될 뻔한 한강버스 수사의뢰서, '브로커와 뇌물 의혹' 담겼다", lambda a: a is None, "빠짐"),
     ("전통시장 화재 안전…'디지털 기술로 강화한다'", lambda a: a is None, "빠짐"),
-    ("LH, 신길4 등 3개 지구 도심 공공복합사업 속도 낸다…", lambda a: a and a.auto_category == "모회사·부처" and a.score <= 10, "모회사·부처, 10 이하"),
+    ("LH, 신길4 등 3개 지구 도심 공공복합사업 속도 낸다…", lambda a: a and a.auto_category == "모회사·부처" and a.score <= 15, "※모회사·부처, 15 이하(모회사어 20점)"),
     ("전북특별자치도, 가정형 베란다 태양광 보급 확대 나선다", lambda a: a is None, "빠짐"),
     ("민요부터 요들송까지…분당하얀6단지에 찾아온 음악 선물", lambda a: a and a.hits["S"] == ["분당하얀6단지"], "※단지명 기본값 → S"),
 ]
@@ -154,6 +160,33 @@ checks.append(("Claude 답변에서 규칙 꺼내기", rules.normalize(rules.fro
 for i, (name, ok) in enumerate(checks, 1):
     results.append(bool(ok))
     print(f"3-{i:<2} {'통과' if ok else '실패'} | {name}")
+
+print("\n── 4부: 기발송 메일 백테스트(v1.0.3) ── (여러 매체·24시간 가점 없이, ±5)")
+near = lambda a, x: a is not None and abs(a.score - x) <= 5
+P4 = [
+    ("숨져도 재산 늘어도 파악 불가…임대주택 부정 입주 심각", "테스트일보", lambda a: a and a.auto_category == "리스크" and a.score >= 45, "리스크, 50 이상"),
+    ("세대 내 소방점검 믿을 수 없다 '75%'…원점에서 제도 재검토해야", "아파트관리신문", lambda a: near(a, 25), "전문지 후보, 25 안팎"),
+    ("국토부 핵심 공기업 LH와 HUG, 청렴도 나란히 '4등급'", "테스트일보", lambda a: a and a.auto_category == "리스크" and a.score >= 45, "리스크, 50 이상"),
+    ("17년 만에 다시 쪼개지는 LH…174조 부채·9000명 조직 어디로", "테스트일보", lambda a: a and a.auto_category in ("리스크", "모회사·부처") and a.score >= 40, "리스크/모회사·부처, 45 이상"),
+    ("주거급여에 관리비 추가…취약계층 체납 비극 없도록", "테스트일보", lambda a: a and a.auto_category == "리스크" and a.score >= 55, "리스크, 60 이상"),
+    ("충북지사-괴산시장 상인회, 상생협력 업무협약 체결", "테스트일보", lambda a: a and a.grade == "A?" and near(a, 20), "A?, 20, 추천 제외"),
+    ("공공기관 경영공시 지적 5년간 5042건…1년전보다 11% 증가", "테스트일보", lambda a: a and a.auto_category in ("리스크", "공공기관 공통") and a.score >= 25, "리스크/공공기관 공통, 30 이상"),
+    ("[단독] 공공주택 공급 속도전에 野 제동…'재산권 침해' 공방", "테스트일보", lambda a: a and a.auto_category == "업계·환경" and near(a, 15), "업계·환경, 15 안팎"),
+    ("한강버스 리베이트 의혹 간부, 서울시 감사 중에도 SH 임원 '영전'", "테스트일보", lambda a: a is None or a.score <= 20, "후보 제외 또는 20 이하"),
+]
+day4 = []
+for i, (t, src, check, want) in enumerate(P4, 1):
+    a = judge(art(t, source=src))
+    row(f"4-{i}", t, bool(check(a)), a, want)
+    if a:
+        day4.append(a)
+best4 = ranking.pick_best(day4, r)
+ok = not any(a.grade == "A?" for a in best4)
+results.append(ok)
+print(f"4-10 {'통과' if ok else '실패'} | 지사명만(A?)은 추천 안 함 — 추천: " + " / ".join(a.title[:12] for a in best4))
+ok = rules.matches("부정입주", "임대주택 부정 입주 심각") and rules.matches("부정 입주", "부정입주 적발")
+results.append(ok)
+print(f"4-11 {'통과' if ok else '실패'} | 띄어쓰기 무시(부정입주 = 부정 입주)")
 
 print("\nALL", "PASS" if all(results) else "FAIL", f"{sum(results)}/{len(results)}")
 sys.exit(0 if all(results) else 1)

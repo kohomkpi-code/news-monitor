@@ -26,7 +26,7 @@ HEAD_FILL = PatternFill("solid", fgColor="1F3B5C")
 HEAD_FONT = Font(bold=True, color="FFFFFF")
 A_FILL = PatternFill("solid", fgColor="FBF3E4")
 MANUAL_FILL = PatternFill("solid", fgColor="E4F0F2")
-PART_KEYS = ["A 기관", "S 사업어", "모회사·부처", "B 환경", "리스크", "정책", "여러 매체", "전문지", "지역지",
+PART_KEYS = ["A 기관", "지사명만", "S 사업어", "모회사·부처", "B 환경", "리스크", "정책", "여러 매체", "전문지 기본", "전문지", "지역지",
              "최근 24시간", "단독", "공급·개발", "공고", "행사"]
 
 

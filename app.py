@@ -813,10 +813,11 @@ class App(tk.Tk):
                                 "S·모회사어·정책 조건어가 있을 때만 점수를 줍니다. 공급·개발어는 S가 없을 때, 일상 공고어는 "
                                 "A가 아닐 때 감점. 감점은 음수로 적습니다.")
         numbers(body, ["w_a", "w_s", "w_s2", "w_parent", "w_b", "w_risk", "w_policy", "w_multi_each", "w_multi_max",
-                       "w_specialist", "w_local", "w_recent", "w_exclusive", "w_dev", "w_routine", "w_event_a"])
+                       "w_specialist", "w_specialist_base", "w_local", "w_recent", "w_exclusive", "w_branch_only",
+                       "w_dev", "w_routine", "w_event_a"])
         lists(body, ["parent_words", "risk_words", "risk_context_extra"], height=6)
         lists(body, ["policy_words", "policy_context", "dev_words", "routine_words"], height=5)
-        lists(body, ["specialist_press", "local_press"], height=4)
+        lists(body, ["specialist_press", "specialist_free_press", "local_press"], height=4)
         hline(inner).pack(fill="x")
 
         body = section("④ 분류", "'분류 순서'에서 위부터 처음 맞는 것. 리스크(리스크어 점수) · 기관 직접(A) · 정책·제도"
@@ -1400,7 +1401,8 @@ class App(tk.Tk):
                 found.extend(arts)
             if self.cfg.get("use_feeds", True) and self.cfg.get("extra_feeds"):
                 self.after(0, lambda: self._set_status("전문지 RSS 조회 중…", word="조회 중", kind="busy", progress=0.97))
-                arts, feed_failed = feeds.search_feeds(self.cfg["extra_feeds"], grades, start.date(), end)
+                arts, feed_failed = feeds.search_feeds(self.cfg["extra_feeds"], grades, start.date(), end,
+                                                       free=r["specialist_free_press"])
                 found.extend(arts)
         except NaverApiError as e:
             self.after(0, self._search_failed, str(e))
@@ -1431,19 +1433,27 @@ class App(tk.Tk):
         found = keep(found, lambda a: rules.media_hit(media, a.source, a.link), "제외 매체")
 
         # ② 제목 검증: 구글은 검색어가 제목에 없어도 관련 기사를 준다 → 걸린 키워드를 제목(요약)으로 다시 확인
+        free = r["specialist_free_press"]
+
         def verify(a: Article):
             kh = ranking.keyword_hits(a, r)
             matched = kh["A"] + kh["S"] + kh["B"]
-            if not matched:
+            if matched:
+                a.keywords = list(dict.fromkeys(matched))
+                a.grade = "A" if kh["A"] else "S" if kh["S"] else "B"
+            elif kh["A?"]:  # 지사명만 — 표에는 올리되 추천은 안 함
+                a.keywords, a.grade = kh["A?"], "A?"
+            elif any(m and m in a.source for m in free):  # 키워드 면제 전문지(실무 기사)
+                a.keywords, a.grade = ["전문지"], "전문지"
+            else:
                 return ", ".join(a.keywords)  # 검색에 쓴 키워드
-            a.keywords = list(dict.fromkeys(matched))
-            a.grade = "A" if kh["A"] else "S" if kh["S"] else "B"
             return None
         found = keep(found, verify, "검증 실패(제목에 키워드 없음)")
 
-        # ③ 제외어는 B 에만(A·S 는 예외)
+        # ③ 제외어는 A·S 를 뺀 나머지(B·전문지·A?)에만
         ex = r["exclude_words"]
-        found = keep(found, lambda a: ", ".join(rules.hits(ex, a.title)) or None if a.grade == "B" else None, "제외어")
+        found = keep(found, lambda a: ", ".join(rules.hits(ex, a.title)) or None if a.grade not in ("A", "S") else None,
+                     "제외어")
 
         # ④ 단순 행사: A 는 빼지 않고 감점(점수 규칙), 나머지는 뺀다
         events_skipped = 0
@@ -1525,7 +1535,9 @@ class App(tk.Tk):
         msg = (f"[{src}] 수집 {raw_count}건"
                + "".join(f" → {short.get(r, r)} {n}건 제외" for r, n in reasons.items())
                + (f" → 같은 사안 {merged}건 묶음" if merged else "")
-               + f" → 표시 {len(found)}건 (A {count('A')} · S {count('S')} · B {count('B')})"
+               + f" → 표시 {len(found)}건 (A {count('A')} · S {count('S')} · B {count('B')}"
+               + (f" · 전문지 {count('전문지')}" if count("전문지") else "")
+               + (f" · 지사명만 {count('A?')}" if count("A?") else "") + ")"
                + (f" · ★추천 {n_best}건" if n_best >= self.cfg["rules"]["best_count"]
                   else f" · 오늘은 ★추천 {n_best}건 (기준 {self.cfg['rules']['min_score']}점 이상)"))
         n_risk = sum(1 for a in found if a.grade != "직접" and a.auto_category == "리스크")
@@ -1564,7 +1576,7 @@ class App(tk.Tk):
         """키워드별 선택 목록: 등급 A·S·B, 그리고 결과에 나온 키워드(건수 포함)."""
         arts = list(self.arts.values())
         self.pick_targets.clear()
-        for g in ("A", "S", "B"):
+        for g in ("A", "A?", "S", "B", "전문지"):
             n = sum(1 for a in arts if a.grade == g)
             if n:
                 self.pick_targets[f"[등급 {g}] 전체 ({n}건)"] = ("grade", g)
