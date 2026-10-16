@@ -1,0 +1,3 @@
+사용 글꼴: Pretendard / Pretendard 로드: True
+찾은 패밀리: ['@Malgun Gothic', '@Malgun Gothic Semilight', 'Malgun Gothic', 'Malgun Gothic Semilight', 'Pretendard', 'Pretendard SemiBold']
+화면 배율(1pt=px): 1.333
