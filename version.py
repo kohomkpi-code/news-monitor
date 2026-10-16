@@ -4,10 +4,10 @@
 GitHub Actions가 이 값을 읽어 'v0.1.0' 같은 태그로 Release를 만든다.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 APP_NAME = "NewsMonitor"
-APP_TITLE = "언론보도 모니터링"
+APP_TITLE = "KOHOM 뉴스룸"
 GITHUB_REPO = "kohomkpi-code/news-monitor"
 EXE_NAME = "NewsMonitor.exe"   # v0.3.1 이하가 자동 업데이트로 찾는 이름(호환용으로 계속 올림)
 

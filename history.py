@@ -2,7 +2,7 @@
 
 '보고 완료로 기록' 버튼을 누르면 그날 보고한 기사가 저장되고,
 다음 조회 때 '이미 보고한 기사 제외' 옵션으로 걸러진다. [보고 기록] 탭에서 날짜별로 본다.
-365일이 지난 기록은 자동 삭제한다.
+3년이 지난 기록은 자동 삭제한다.
 
 저장 형태 {링크: 정보}:
   {"date": "2026-10-16", "time": "09:41", "title": 제목, "source": 매체,
@@ -10,6 +10,9 @@
 - 같은 사안으로 묶인 다른 매체 기사도 함께 기록한다(다음 조회에서 걸러지게). 그런 줄은 main 이
   대표 기사 링크라서, 화면에는 대표 기사만 한 줄로 보인다.
 - v0.6 이하의 {링크: 날짜} 형태도 그대로 읽는다.
+- 그룹웨어에서 내려받은 지난 보고 메일도 불러올 수 있다(import_day, mail_import.py).
+- 기사 주소는 구글 경유 주소와 원문 주소가 달라 링크만으로는 못 맞출 때가 있어서,
+  '이미 보고한 기사'는 제목으로도 한 번 더 확인한다(sent_titles).
 """
 
 import datetime as dt
@@ -19,7 +22,7 @@ import os
 from config import app_dir
 
 HISTORY_PATH = os.path.join(app_dir(), "sent_history.json")
-KEEP_DAYS = 365
+KEEP_DAYS = 365 * 3  # 3년 — 불러온 지난 보고 메일도 오래 남게
 
 
 def _normalize(link: str, v) -> dict:
@@ -70,6 +73,25 @@ def mark_sent(entries: list[dict], when: dt.datetime | None = None) -> int:
             added += 1
     save(data)
     return added
+
+
+def import_day(day: str, time: str, items: list[tuple[str, str, str]]) -> tuple[int, int]:
+    """지난 보고 메일 한 통을 기록에 넣는다. items = [(링크, 제목, 매체)]. (추가 수, 이미 있던 수)."""
+    data = load()
+    added = skipped = 0
+    for link, title, source in items:
+        if link in data:
+            skipped += 1
+            continue
+        data[link] = {"date": day, "time": time, "title": title, "source": source, "url": link, "main": link}
+        added += 1
+    save(data)
+    return added, skipped
+
+
+def sent_titles(data: dict[str, dict], normalize) -> set[str]:
+    """보고한 기사 제목들(normalize 로 비교용으로 바꾼 것)."""
+    return {normalize(r["title"]) for r in data.values() if len(r.get("title", "")) >= 8}
 
 
 def is_sent(link: str | list[str], data: dict) -> bool:

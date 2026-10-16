@@ -16,10 +16,11 @@
 
 import dataclasses
 import datetime as dt
+import os
 import threading
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 # 회사 보안장비가 HTTPS 를 검사하면서 자체 인증서로 바꿔 끼우면, Python 은 자기 인증서 목록만
 # 믿어서 접속을 거부한다(CERTIFICATE_VERIFY_FAILED). 브라우저처럼 윈도우 인증서 저장소를 믿게 한다.
@@ -37,6 +38,7 @@ import dedup
 import feeds
 import google_news
 import history
+import mail_import
 import naver_api
 import ranking
 import report
@@ -114,7 +116,7 @@ class App(tk.Tk):
         head = ttk.Frame(self)
         head.pack(fill="x", padx=10, pady=(6, 0))
         ttk.Label(head, text=APP_TITLE, font=FONT_BIG, foreground="#1F3B5C").pack(side="left")
-        ttk.Label(head, text=f"v{__version__}", foreground="#888").pack(side="right")
+        ttk.Label(head, text=f"v{__version__}", foreground="#2E7D8C", font=FONT_BOLD).pack(side="left", padx=(6, 0), pady=(3, 0))
         ttk.Button(head, text="업데이트 확인", command=self._check_update).pack(side="right", padx=4)
 
         self.status_var = tk.StringVar(value="준비됨")
@@ -282,7 +284,7 @@ class App(tk.Tk):
             height=10, side="top")
 
     def _build_history(self, tab):
-        ttk.Label(tab, text=f"'보고 완료로 기록'한 기사를 날짜별로 봅니다. 기록은 {history.KEEP_DAYS}일 보관합니다. "
+        ttk.Label(tab, text=f"'보고 완료로 기록'한 기사와 불러온 지난 보고 메일을 날짜별로 봅니다. 기록은 {history.KEEP_DAYS // 365}년 보관합니다. "
                             "기록을 취소하면 다음 조회에 다시 나옵니다.", foreground="#2E7D8C").pack(anchor="w", pady=(0, 6))
         body = ttk.Frame(tab)
         body.pack(fill="both", expand=True)
@@ -318,6 +320,7 @@ class App(tk.Tk):
         bottom.pack(fill="x", pady=(6, 0))
         ttk.Button(bottom, text="이 날 보고서 다시 열기 (메일용)", command=self._reopen_history_report).pack(side="left")
         ttk.Button(bottom, text="새로고침", command=self._refresh_history).pack(side="left", padx=6)
+        ttk.Button(bottom, text="기존 보고 메일 불러오기 (HTML)", command=self._import_mails).pack(side="left", padx=(12, 0))
         ttk.Button(bottom, text="선택한 기사 기록 취소", command=self._remove_history_items).pack(side="right")
         self.history_days: dict[str, list[tuple[str, dict]]] = {}
         self._refresh_history()
@@ -381,6 +384,74 @@ class App(tk.Tk):
 
         self._set_status("기사 원문 주소 확인 중…")
         threading.Thread(target=work, daemon=True).start()
+
+    def _import_mails(self):
+        """그룹웨어에서 내려받은 지난 보고 메일(HTML) 여러 개 → 미리보기 → 보고 기록에 넣기."""
+        paths = filedialog.askopenfilenames(
+            parent=self, title="지난 보고 메일 파일 고르기 (여러 개 가능)",
+            filetypes=[("메일 HTML", "*.html *.htm *.mht *.mhtml *.eml"), ("모든 파일", "*.*")])
+        if not paths:
+            return
+        reports = [mail_import.parse_file(p) for p in paths]
+        reports.sort(key=lambda r: (r.day or dt.date.max, r.path))
+
+        win = tk.Toplevel(self)
+        win.title("기존 보고 메일 불러오기 — 확인")
+        win.transient(self)
+        win.grab_set()
+        frm = ttk.Frame(win, padding=12)
+        frm.pack(fill="both", expand=True)
+        ttk.Label(frm, text="파일마다 찾은 보고일과 기사 수입니다. 보고일이 틀리거나 비었으면 그 줄을 더블클릭해 고치세요.\n"
+                            "이미 기록에 있는 기사는 건너뜁니다.", foreground="#444").pack(anchor="w")
+        tree = ttk.Treeview(frm, columns=("file", "day", "time", "n", "note"), show="headings", height=12)
+        for col, head, width in (("file", "파일", 300), ("day", "보고일", 100), ("time", "시각", 60),
+                                 ("n", "기사", 50), ("note", "날짜 찾은 곳 / 문제", 160)):
+            tree.heading(col, text=head)
+            tree.column(col, width=width, anchor="w" if col == "file" else "center")
+        tree.pack(fill="both", expand=True, pady=8)
+
+        def show():
+            tree.delete(*tree.get_children())
+            for i, r in enumerate(reports):
+                tree.insert("", "end", iid=str(i), values=(
+                    os.path.basename(r.path), r.day.isoformat() if r.day else "(직접 입력)", r.time,
+                    len(r.items), r.note))
+
+        def edit_day(event):
+            iid = tree.identify_row(event.y)
+            if not iid:
+                return
+            r = reports[int(iid)]
+            text = simpledialog.askstring("보고일 고치기", f"{os.path.basename(r.path)}\n보고일 (예: 2026-10-15)",
+                                          initialvalue=r.day.isoformat() if r.day else "", parent=win)
+            if text:
+                try:
+                    r.day = dt.date.fromisoformat(text.strip())
+                    r.note = "직접 입력"
+                except ValueError:
+                    messagebox.showwarning("보고일", "2026-10-15 형식으로 적어 주세요.", parent=win)
+            show()
+
+        def do_import():
+            added = skipped = files = 0
+            for r in reports:
+                if r.day and r.items:
+                    a, s = history.import_day(r.day.isoformat(), r.time, r.items)
+                    added, skipped, files = added + a, skipped + s, files + 1
+            win.destroy()
+            last = max((r.day for r in reports if r.day and r.items), default=None)
+            self._refresh_history(select_day=last.isoformat() if last else None)
+            left = len(reports) - files
+            self._set_status(f"지난 보고 메일 {files}개에서 {added}건 불러옴"
+                             + (f" · 이미 있던 {skipped}건 건너뜀" if skipped else "")
+                             + (f" · 날짜·기사를 못 찾은 파일 {left}개 제외" if left else ""))
+
+        tree.bind("<Double-1>", edit_day)
+        show()
+        btns = ttk.Frame(frm)
+        btns.pack(anchor="e")
+        ttk.Button(btns, text="불러오기", command=do_import).pack(side="left", padx=4)
+        ttk.Button(btns, text="취소", command=win.destroy).pack(side="left")
 
     def _remove_history_items(self):
         links = list(self.rec_tree.selection())
@@ -577,7 +648,9 @@ class App(tk.Tk):
         if self.cfg.get("exclude_sent", True):
             sent = history.load()
             before = len(found)
-            found = [a for a in found if not history.is_sent(a.all_links, sent)]
+            titles = history.sent_titles(sent, dedup.normalize)
+            found = [a for a in found if not history.is_sent(a.all_links, sent)
+                     and dedup.normalize(a.title) not in titles]
             sent_skipped = before - len(found)
         self.after(0, self._search_done, found, raw_count, sent_skipped, feed_failed, events_skipped)
 

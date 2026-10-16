@@ -52,6 +52,9 @@ DOMAIN_TO_NAME = {
     "korea.kr": "정책브리핑",
     "yonhapnewstv.co.kr": "연합뉴스TV",
     "lh.or.kr": "LH",
+    "aptn.co.kr": "아파트관리신문",
+    "hapt.co.kr": "한국아파트신문",
+    "electimes.com": "전기신문",
 }
 
 
