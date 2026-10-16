@@ -764,7 +764,8 @@ class App(tk.Tk):
         win, body, _ = self._dialog(
             "전문지 고르기",
             "함께 조회할 전문지를 고릅니다. 첫 칸을 눌러 켜고 끄고, 아래 칸에서 매체를 추가·수정합니다.\n"
-            "RSS 주소는 보통 신문사 홈페이지 맨 아래 'RSS' 메뉴에 있습니다 (예: https://www.○○.co.kr/rss/allArticle.xml).",
+            "언론사 홈페이지 주소만 넣어도 됩니다(예: www.aptn.co.kr) — RSS 주소(…/rss/allArticle.xml)를 찾아 연결까지 확인하고,\n"
+            "매체 칸을 비워 두면 이름도 채웁니다.",
             "저장", save)
         imgs = {k: tk.PhotoImage(master=win, data=getattr(theme.icons, k)) for k in ("CHECK_ON", "CHECK_OFF")}
         win._imgs = imgs
@@ -784,7 +785,7 @@ class App(tk.Tk):
         name_v, url_v = tk.StringVar(), tk.StringVar()
         ttk.Label(form, text="매체", style="PanelTitle.TLabel").pack(side="left", padx=(0, 8))
         ttk.Entry(form, textvariable=name_v, width=14).pack(side="left")
-        ttk.Label(form, text="RSS 주소", style="PanelTitle.TLabel").pack(side="left", padx=(14, 8))
+        ttk.Label(form, text="홈페이지 또는 RSS 주소", style="PanelTitle.TLabel").pack(side="left", padx=(14, 8))
         ttk.Entry(form, textvariable=url_v, width=40).pack(side="left", fill="x", expand=True)
         btns = tk.Frame(body, bg=PANEL)
         btns.pack(fill="x", pady=(8, 0))
@@ -817,29 +818,53 @@ class App(tk.Tk):
                 name_v.set(feeds_[i]["name"])
                 url_v.set(feeds_[i]["url"])
 
-        def valid() -> tuple[str, str] | None:
-            name, url = name_v.get().strip(), url_v.get().strip()
-            if not name or not url.startswith("http"):
-                info.configure(text="매체 이름과 http 로 시작하는 RSS 주소를 적어 주세요.")
-                return None
-            return name, url
+        def resolve(then):
+            """주소 칸(홈페이지 또는 RSS) → RSS 주소 찾기·연결 확인 → then(이름, RSS 주소, 결과)."""
+            name, text = name_v.get().strip(), url_v.get().strip()
+            if not text:
+                info.configure(text="언론사 홈페이지 주소(예: www.aptn.co.kr)나 RSS 주소를 적어 주세요.")
+                return
+            info.configure(text="RSS 주소를 찾는 중…")
+
+            def work():
+                url, title, result = feeds.discover(text)
+                self.after(0, done, url, title, result)
+
+            def done(url, title, result):
+                if url is None and not feeds.looks_like_rss(text):
+                    info.configure(text=result)
+                    return
+                url = url or feeds.rss_candidates(text)[0]  # RSS 주소를 직접 넣었으면 연결이 안 돼도 넣는다
+                name_ = name or title or feeds.urlparse(url).netloc.replace("www.", "")
+                name_v.set(name_)
+                url_v.set(url)
+                then(name_, url, result)
+            threading.Thread(target=work, daemon=True).start()
 
         def add():
-            v = valid()
-            if v:
-                feeds_.append({"name": v[0], "url": v[1], "on": True})
+            def then(name, url, result):
+                same = next((f for f in feeds_ if f["url"].split("://")[-1] == url.split("://")[-1]), None)
+                if same:
+                    info.configure(text=f"이미 목록에 있는 매체입니다: {same['name']}")
+                    return
+                feeds_.append({"name": name, "url": url, "on": True})
+                results[len(feeds_) - 1] = result
                 show(len(feeds_) - 1)
-                info.configure(text=f"'{v[0]}'을(를) 추가했습니다. [연결 확인]으로 받아지는지 보세요.")
+                info.configure(text=f"'{name}'을(를) 추가했습니다 — {result}. [저장]을 눌러야 반영됩니다.")
+            resolve(then)
 
         def update():
-            i, v = selected(), valid()
+            i = selected()
             if i is None:
                 info.configure(text="고칠 매체를 표에서 먼저 고르세요.")
-            elif v:
-                feeds_[i].update(name=v[0], url=v[1])
-                results.pop(i, None)
+                return
+
+            def then(name, url, result):
+                feeds_[i].update(name=name, url=url)
+                results[i] = result
                 show(i)
-                info.configure(text=f"'{v[0]}'을(를) 고쳤습니다.")
+                info.configure(text=f"'{name}'을(를) 고쳤습니다 — {result}.")
+            resolve(then)
 
         def delete():
             i = selected()
@@ -1537,8 +1562,9 @@ class App(tk.Tk):
 
     def _update_result(self, info, verbose: bool):
         if isinstance(info, str):
-            if verbose:
-                self._set_status(f"업데이트 확인 실패: {info}")
+            if verbose:  # [업데이트 확인]을 직접 눌렀을 때만 알린다(켤 때 자동 확인은 조용히)
+                self._set_status(f"업데이트를 확인하지 못했습니다: {info}", word="업데이트", kind="error")
+                messagebox.showwarning("업데이트 확인 실패", self._no_github_message(info))
             return
         if not updater.is_newer(info.version):
             if verbose:
@@ -1553,6 +1579,14 @@ class App(tk.Tk):
         else:
             if messagebox.askyesno("업데이트", f"새 버전 {info.version} 이 있습니다. 다운로드 페이지를 열까요?{notes}"):
                 webbrowser.open(info.page_url)
+
+    def _no_github_message(self, detail: str) -> str:
+        return ("이 PC에서 GitHub(github.com)에 접속할 수 없어 새 버전을 확인하지 못했습니다.\n"
+                "회사 보안정책으로 GitHub 접속이 막힌 PC일 수 있습니다.\n\n"
+                "새 버전이 필요하면 공문으로 안내된 곳에서 최신 파일(NewsMonitor_v○○.exe)을 받아\n"
+                "지금 쓰는 파일과 바꿔 주세요. 설정과 보고 기록은 그대로 남습니다.\n"
+                "(외부에서는 github.com/kohomkpi-code/news-monitor/releases 에서 받을 수 있습니다.)\n\n"
+                f"지금 버전: v{__version__}\n오류 내용: {detail}")
 
     def _apply_update(self, info):
         win = tk.Toplevel(self)
@@ -1571,7 +1605,9 @@ class App(tk.Tk):
             try:
                 updater.apply_update(info.asset_url, progress)
             except Exception as e:
-                self.after(0, lambda: (win.destroy(), messagebox.showerror("업데이트 실패", str(e))))
+                msg = self._no_github_message(f"{type(e).__name__}: {e}"[:200]).replace(
+                    "새 버전을 확인하지 못했습니다", "새 버전 파일을 내려받지 못했습니다")
+                self.after(0, lambda: (win.destroy(), messagebox.showerror("업데이트 실패", msg)))
 
         threading.Thread(target=worker, daemon=True).start()
 

@@ -1,0 +1,40 @@
+# 내려받기 현황: 매일 아침(한국시간 9시쯤) GitHub 내려받기 수를 모아 stats 브랜치의 STATS.md 를 고친다.
+# 보는 곳: https://github.com/kohomkpi-code/news-monitor/blob/stats/STATS.md
+
+name: stats
+
+on:
+  schedule:
+    - cron: "17 0 * * *"   # UTC 00:17 = 한국시간 09:17
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 이전 기록 가져오기
+        run: |
+          mkdir -p out
+          if git fetch -q origin stats 2>/dev/null; then git show FETCH_HEAD:history.csv > out/history.csv || true; fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 집계
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          pip install -q requests
+          python tools/download_stats.py out
+      - name: stats 브랜치에 올리기
+        run: |
+          cd out
+          git init -q
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add STATS.md history.csv
+          git commit -q -m "stats $(date -u +%F)"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:stats

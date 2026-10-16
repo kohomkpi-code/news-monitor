@@ -39,6 +39,15 @@ def parse_date(text: str) -> dt.datetime:
     raise ValueError(f"날짜 형식을 알 수 없음: {text}")
 
 
+def channel_title(xml_text: str | bytes) -> str:
+    """RSS 맨 위 <channel><title> — 보통 매체 이름. 못 읽으면 빈 문자열."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return ""
+    return clean_text(root.findtext("channel/title") or "")
+
+
 def parse_items(xml_text: str | bytes, where: str = "RSS") -> list[RssItem]:
     try:
         root = ET.fromstring(xml_text)

@@ -21,7 +21,8 @@ DEFAULT_CONFIG = {
     "source": "google",        # google | naver
     "client_id": "",
     "client_secret": "",
-    "keywords_version": 2,     # 기본 키워드 목록이 바뀌면 올린다(옛 목록을 새 기본값으로 교체)
+    "keywords_version": 2,
+    "feeds_version": 2,        # 기본 전문지 목록이 바뀌면 올린다(v0.9.2: 전기신문 제외)     # 기본 키워드 목록이 바뀌면 올린다(옛 목록을 새 기본값으로 교체)
     "keywords_a": ["주택관리공단"],
     "keywords_b": [
         "주택관리", "LH", "한국토지주택공사", "공기업", "공공기관", "국토교통부", "국토교통위원회",
@@ -41,7 +42,6 @@ DEFAULT_CONFIG = {
     "extra_feeds": [
         {"name": "아파트관리신문", "url": "https://www.aptn.co.kr/rss/allArticle.xml", "on": True},
         {"name": "한국아파트신문", "url": "https://www.hapt.co.kr/rss/allArticle.xml", "on": True},
-        {"name": "전기신문", "url": "https://www.electimes.com/rss/allArticle.xml", "on": True},
     ],
     "days_back": 2,            # (v0.6 부터 안 씀: 조회 기간은 '직전 영업일 9시~'로 자동)
     "best_count": 5,           # 베이직 탭 추천 건수
@@ -85,6 +85,10 @@ def load() -> dict:
         # 기본 키워드 목록이 바뀜(v0.5.0: 담당자 수기 검색 목록) → A·B 를 새 기본값으로
         for key in ("keywords_a", "keywords_b", "keywords", "keywords_version"):
             saved.pop(key, None)
+    if saved and saved.get("feeds_version", 1) < 2:
+        # v0.9.2: 전기신문을 기본 전문지에서 뺌 — 저장된 목록에서도 뺀다(직접 추가한 매체는 그대로)
+        saved["extra_feeds"] = [f for f in saved.get("extra_feeds", []) if "electimes.com" not in f.get("url", "")]
+        saved["feeds_version"] = DEFAULT_CONFIG["feeds_version"]
     cfg.update(saved)
     cfg["keywords"] = all_keywords(cfg)
     return cfg
