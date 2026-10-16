@@ -37,10 +37,12 @@ class Article:
     published: dt.datetime
     description: str
     keywords: list = field(default_factory=list)  # 이 기사를 찾아낸 키워드들
-    grade: str = ""      # 키워드 등급: "A"(기관 직접) / "B"(정책·환경)
+    grade: str = ""      # 키워드 등급: "A"(기관 직접) / "B"(정책·환경) / "직접"(사람이 링크로 추가)
     category: str = ""   # AI 선정 분류 (예: 리스크, 기관 직접)
     insight: str = ""    # AI 선정 한 줄 인사이트
     others: list = field(default_factory=list)  # 같은 사안으로 묶인 다른 기사 [(매체, 제목, 링크)]
+    score: int = 0       # 추천 점수 (ranking.py)
+    best: bool = False   # 추천 5건에 뽑혔는지
 
     @property
     def source_label(self) -> str:

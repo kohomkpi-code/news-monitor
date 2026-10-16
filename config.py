@@ -15,6 +15,8 @@ import json
 import os
 import sys
 
+from calendar_kr import DEFAULT_HOLIDAYS
+
 DEFAULT_CONFIG = {
     "source": "google",        # google | naver
     "client_id": "",
@@ -41,7 +43,11 @@ DEFAULT_CONFIG = {
         {"name": "한국아파트신문", "url": "https://www.hapt.co.kr/rss/allArticle.xml"},
         {"name": "전기신문", "url": "https://www.electimes.com/rss/allArticle.xml"},
     ],
-    "days_back": 2,            # 기본 조회 기간: 최근 3일(연휴 뒤 누락 방지)
+    "days_back": 2,            # (v0.6 부터 안 씀: 조회 기간은 '직전 영업일 9시~'로 자동)
+    "best_count": 5,           # 베이직 탭 추천 건수
+    "holidays": DEFAULT_HOLIDAYS,  # 공휴일 — 자동 조회 기간 계산용([설정] 탭에서 수정)
+    "last_tab": "basic",       # 마지막으로 본 탭
+    "last_search_at": "",      # 마지막 조회 시각
     "exclude_sent": True,      # 이미 보고한 기사 제외
     "merge_similar": True,     # 제목이 거의 같은 기사 묶기
     "similar_threshold": 0.85, # 유사 제목 판정 기준 (0~1)
