@@ -58,6 +58,7 @@ from version import APP_TITLE, __version__
 KST = calendar_kr.KST
 SOURCE_LABELS = {"google": "구글 뉴스", "naver": "네이버"}
 TABS = ["basic", "pro", "history", "rules", "settings"]
+LOG_PREVIEW = 3  # [선정 규칙] 탭 변경 이력에 보일 최근 건수
 TAB_NAMES = {"basic": "베이직", "pro": "프로", "history": "보고 기록", "rules": "선정 규칙", "settings": "설정"}
 STEPS = [("조회", "기간 확인 후 조회"), ("추천 확인", "★추천 확인 · 선택 0건"),
          ("보고서 열기", "제목·본문 복사 → 메일 붙여넣기"), ("보고 완료로 기록", "보낸 기사는 다음 조회에서 빠짐")]
@@ -833,9 +834,12 @@ class App(tk.Tk):
         numbers(body, ["best_count", "min_score", "risk_first_max", "a_min", "per_category_max", "industry_max"])
         hline(inner).pack(fill="x")
 
-        body = section("변경 이력", "규칙을 저장할 때마다 무엇이 바뀌었는지 남깁니다(최근 10개).")
+        body = section("변경 이력", f"규칙을 저장할 때마다 무엇이 바뀌었는지 남깁니다. 여기는 최근 {LOG_PREVIEW}건만, "
+                                   "전체 내용은 [변경 이력 보기]에서 봅니다.")
         self.rules_log_label = ttk.Label(body, text="", style="Panel.TLabel", wraplength=860, justify="left")
         self.rules_log_label.pack(anchor="w")
+        self.rules_log_btn = ttk.Button(body, text="변경 이력 보기", style="Small.TButton", command=self._show_rules_log)
+        self.rules_log_btn.pack(anchor="w", pady=(8, 0))
 
         foot = tk.Frame(page, bg=BG)
         foot.grid(row=2, column=0, sticky="ew", pady=(12, 0))
@@ -865,10 +869,31 @@ class App(tk.Tk):
             self.rule_counts[key].configure(text=f"{len(self._lines(text))}개")
 
     def _update_rules_log(self):
-        log = self.cfg.get("rules_log", [])[-10:][::-1]
-        lines = [f"{e['at']} · {e['how']} · " + " / ".join(e["changes"][:6])
-                 + (f" 외 {len(e['changes']) - 6}건" if len(e["changes"]) > 6 else "") for e in log]
+        """탭에는 최근 몇 건만 짧게(항목 이름만). 자세한 것은 [변경 이력 보기]."""
+        full = self.cfg.get("rules_log", [])
+        lines = []
+        for e in full[-LOG_PREVIEW:][::-1]:
+            names = [c.split(":")[0] for c in e["changes"]]
+            lines.append(f"{e['at']} · {e['how']} · " + ", ".join(names[:4])
+                         + (f" 외 {len(names) - 4}개 항목" if len(names) > 4 else ""))
         self.rules_log_label.configure(text="\n".join(lines) or "아직 바꾼 적이 없습니다(기본 규칙 사용 중).")
+        self.rules_log_btn.configure(text=f"변경 이력 보기 (전체 {len(full)}건)")
+        self.rules_log_btn.state(["!disabled"] if full else ["disabled"])
+
+    def _show_rules_log(self):
+        """변경 이력 전체: 최근 것부터, 바뀐 내용 한 줄씩."""
+        full = self.cfg.get("rules_log", [])
+        win, body, _ = self._dialog("변경 이력", f"규칙을 바꾼 기록 {len(full)}건입니다(최근 것부터, 최대 100건 보관).",
+                                    None, None, secondary="닫기")
+        wrap, box = theme.text_box(body, self.F, height=20, width=96)
+        wrap.pack(fill="both", expand=True)
+        box.configure(wrap="word", spacing1=2)
+        box.tag_configure("head", font=self.F.title, foreground=NAVY, spacing1=10)
+        for e in full[::-1]:
+            box.insert("end", f"{e['at']} · {e['how']} · 바뀐 항목 {len(e['changes'])}개\n", "head")
+            for c in e["changes"]:
+                box.insert("end", f"  • {c}\n")
+        box.configure(state="disabled")
 
     def _rules_from_ui(self) -> dict:
         """화면의 규칙. 숫자가 아닌 칸이 있으면 ValueError(칸 이름)."""
@@ -971,7 +996,7 @@ class App(tk.Tk):
     def _export_rules_file(self):
         path = filedialog.asksaveasfilename(
             parent=self, title="규칙 파일 내보내기", defaultextension=".json",
-            initialfile=f"KOHOM뉴스룸_선정규칙_{dt.datetime.now(KST):%Y%m%d}.json", filetypes=[("규칙 파일", "*.json")])
+            initialfile=f"KOHOM뉴스룸_선정규칙_{dt.datetime.now(KST):%Y%m%d_%H%M}.json", filetypes=[("규칙 파일", "*.json")])
         if not path:
             return
         with open(path, "w", encoding="utf-8") as f:
@@ -1222,8 +1247,10 @@ class App(tk.Tk):
         inner = ttk.Frame(bar, style="Bar.TFrame")
         inner.pack(fill="x", padx=20, pady=12)
         ttk.Button(inner, text=secondary, style="Secondary.TButton", width=10, command=win.destroy).pack(side="right")
-        pbtn = ttk.Button(inner, text=primary, style="Primary.TButton", width=10, command=on_primary)
-        pbtn.pack(side="right", padx=(0, 8))
+        pbtn = None
+        if primary:  # 주 버튼 없이 [닫기]만 있는 창도 있다
+            pbtn = ttk.Button(inner, text=primary, style="Primary.TButton", width=10, command=on_primary)
+            pbtn.pack(side="right", padx=(0, 8))
         body = tk.Frame(win, bg=PANEL)
         body.pack(fill="both", expand=True, padx=20, pady=(18, 14))
         ttk.Label(body, text=intro, style="PanelDesc.TLabel", justify="left").pack(anchor="w", pady=(0, 12))

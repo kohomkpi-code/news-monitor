@@ -23,7 +23,7 @@ DEFAULT_CONFIG = {
     "client_id": "",
     "client_secret": "",
     "keywords_version": 3,     # 기본 키워드 체계가 바뀌면 올린다(v1.0.0: A·S·B 3단 → rules)
-    "feeds_version": 4,        # 기본 전문지 목록이 바뀌면 올린다(v0.9.2: 전기신문 제외, v1.0.2: 경남일보 끔, v1.0.3: 전기신문 다시)
+    "feeds_version": 5,        # 기본 전문지 목록이 바뀌면 올린다(v0.9.2: 전기신문 제외, v1.0.2: 경남일보 끔, v1.0.4: 전기신문 끔)
     "rules": rules.DEFAULT_RULES,
     "rules_version": rules.RULES_VERSION,
     "rules_log": [],
@@ -33,7 +33,6 @@ DEFAULT_CONFIG = {
     "extra_feeds": [
         {"name": "아파트관리신문", "url": "https://www.aptn.co.kr/rss/allArticle.xml", "on": True},
         {"name": "한국아파트신문", "url": "https://www.hapt.co.kr/rss/allArticle.xml", "on": True},
-        {"name": "전기신문", "url": "https://www.electimes.com/rss/allArticle.xml", "on": True},
     ],
     "days_back": 2,            # (v0.6 부터 안 씀: 조회 기간은 '직전 영업일 9시~'로 자동)
     "holidays": DEFAULT_HOLIDAYS,  # 공휴일 — 자동 조회 기간 계산용([설정] 탭에서 수정)
@@ -97,11 +96,11 @@ def load() -> dict:
         for f in saved.get("extra_feeds", []):
             if "경남일보" in f.get("name", "") or "gnnews.co.kr" in f.get("url", ""):
                 f["on"] = False
-    if saved and saved.get("feeds_version", 1) < 4:
-        # v1.0.3: 기발송 메일에 전기신문 실무 기사가 있어 다시 넣음(키워드 면제 전문지). 이미 있으면 그대로
-        fs = saved.setdefault("extra_feeds", list(DEFAULT_CONFIG["extra_feeds"][:2]))
-        if not any("electimes.com" in f.get("url", "") for f in fs):
-            fs.append(dict(DEFAULT_CONFIG["extra_feeds"][2]))
+    if saved and saved.get("feeds_version", 1) < 5:
+        # v1.0.4: 담당자가 전기신문을 전문지 목록에서 뺐다 → v1.0.3 에서 다시 넣은 전기신문 RSS 를 끈다(목록엔 남김)
+        for f in saved.get("extra_feeds", []):
+            if "electimes.com" in f.get("url", ""):
+                f["on"] = False
     if saved:
         saved["feeds_version"] = DEFAULT_CONFIG["feeds_version"]
     cfg.update(saved)
