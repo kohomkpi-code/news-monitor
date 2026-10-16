@@ -154,6 +154,11 @@ def _decode_new_format(art_id: str) -> str | None:
     return _parse_batch_response(resp.text)
 
 
+def cached_link(url: str) -> str:
+    """이미 찾아 둔 원문 주소(없으면 빈 문자열). 인터넷에 묻지 않는다."""
+    return _resolved.get(url, "")
+
+
 def resolve_link(url: str) -> str:
     """구글 주소를 언론사 원문 주소로 바꾼다. 실패하면 받은 주소를 그대로 돌려준다."""
     m = _ID_RE.search(url or "")

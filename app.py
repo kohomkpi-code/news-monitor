@@ -8,7 +8,9 @@
 - 베이직: 누구나. [조회] 한 번이면 기간은 자동(직전 영업일 9시~), 추천 5건이 선택된 채로 나온다.
           체크를 더하고 빼서 → 보고서 열기 → 메일 붙여넣기 → 보고 완료로 기록.
 - 프로:   키워드·제외어·기간 직접 설정, 키워드별 선택, AI 선별 중계(요청문 복사·선정 결과 붙여넣기).
+- 보고 기록: '보고 완료로 기록'한 기사를 날짜별로 본다. 그날 보고서 다시 열기, 잘못 기록한 것 취소.
 - 설정:   출처, 전문지 RSS, 메일 제목, 행사 단어, 공휴일 등.
+조회 기간(베이직·프로 공통)은 앱을 켜면 '직전 영업일 9시 ~ 오늘'로 자동으로 채워지고, 고칠 수 있다.
 두 탭은 같은 조회 결과를 보지만 선택(☑)은 따로 가진다.
 """
 
@@ -49,7 +51,7 @@ FONT_BOLD = ("맑은 고딕", 10, "bold")
 FONT_BIG = ("맑은 고딕", 12, "bold")
 KST = calendar_kr.KST
 SOURCE_LABELS = {"google": "구글 뉴스", "naver": "네이버"}
-TABS = ["basic", "pro", "settings"]
+TABS = ["basic", "pro", "history", "settings"]
 
 
 def parse_start(text: str) -> dt.datetime:
@@ -119,16 +121,23 @@ class App(tk.Tk):
         ttk.Label(self, textvariable=self.status_var, foreground="#1F3B5C", anchor="w").pack(
             side="bottom", fill="x", padx=10, pady=(0, 6))
 
+        # 조회 기간: 베이직·프로 두 탭이 같은 칸을 함께 쓴다
+        self.start_var = tk.StringVar()
+        self.end_var = tk.StringVar()
+
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=8, pady=4)
         self.tab_basic = ttk.Frame(self.nb, padding=6)
         self.tab_pro = ttk.Frame(self.nb, padding=6)
+        self.tab_history = ttk.Frame(self.nb, padding=6)
         self.tab_settings = ttk.Frame(self.nb, padding=10)
         self.nb.add(self.tab_basic, text="  베이직  ")
         self.nb.add(self.tab_pro, text="  프로  ")
+        self.nb.add(self.tab_history, text="  보고 기록  ")
         self.nb.add(self.tab_settings, text="  설정  ")
         self._build_basic(self.tab_basic)
         self._build_pro(self.tab_pro)
+        self._build_history(self.tab_history)
         self._build_settings(self.tab_settings)
         self.nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
@@ -138,8 +147,14 @@ class App(tk.Tk):
         row = ttk.Frame(tab)
         row.pack(fill="x", pady=(0, 6))
         ttk.Button(row, text="① 조회", style="Big.TButton", command=lambda: self._search("basic")).pack(side="left")
+        ttk.Label(row, text="기간").pack(side="left", padx=(14, 4))
+        ttk.Entry(row, textvariable=self.start_var, width=17).pack(side="left")
+        ttk.Label(row, text="~").pack(side="left", padx=2)
+        ttk.Entry(row, textvariable=self.end_var, width=11).pack(side="left")
+        ttk.Button(row, text="자동", width=5, command=self._set_auto_period).pack(side="left", padx=(6, 2))
+        ttk.Button(row, text="오늘", width=5, command=lambda: self._set_period(0)).pack(side="left", padx=2)
+        ttk.Button(row, text="최근 3일", width=8, command=lambda: self._set_period(2)).pack(side="left", padx=2)
         self.basic_period_var = tk.StringVar()
-        ttk.Label(row, textvariable=self.basic_period_var, foreground="#444").pack(side="left", padx=12)
         ttk.Button(row, text="＋ 기사 링크로 추가", command=self._open_add_link).pack(side="right")
         ttk.Button(row, text="★추천으로 되돌리기", command=lambda: self._select_best(self.basic)).pack(side="right", padx=6)
 
@@ -153,8 +168,7 @@ class App(tk.Tk):
                    command=lambda: self._open_report(self.basic, keep_order=True)).pack(side="left")
         ttk.Button(bottom, text="④ 보고 완료로 기록", style="Big.TButton",
                    command=lambda: self._mark_sent(self.basic)).pack(side="left", padx=8)
-        ttk.Label(bottom, text="더 자세한 조정은 [프로] 탭, 출처·공휴일 등은 [설정] 탭",
-                  foreground="#888").pack(side="right")
+        ttk.Label(bottom, textvariable=self.basic_period_var, foreground="#888").pack(side="right")
 
     def _build_pro(self, tab):
         pad = {"pady": 3}
@@ -162,8 +176,6 @@ class App(tk.Tk):
         top = ttk.Frame(tab)
         top.pack(fill="x", **pad)
         ttk.Label(top, text="기간").pack(side="left")
-        self.start_var = tk.StringVar()
-        self.end_var = tk.StringVar()
         ttk.Entry(top, textvariable=self.start_var, width=17).pack(side="left", padx=(6, 2))
         ttk.Label(top, text="~").pack(side="left")
         ttk.Entry(top, textvariable=self.end_var, width=12).pack(side="left", padx=(2, 10))
@@ -269,6 +281,119 @@ class App(tk.Tk):
             right, "공휴일 (자동 기간 계산용) · 임시공휴일은 'YYYY-MM-DD 이름' 한 줄 추가",
             height=10, side="top")
 
+    def _build_history(self, tab):
+        ttk.Label(tab, text=f"'보고 완료로 기록'한 기사를 날짜별로 봅니다. 기록은 {history.KEEP_DAYS}일 보관합니다. "
+                            "기록을 취소하면 다음 조회에 다시 나옵니다.", foreground="#2E7D8C").pack(anchor="w", pady=(0, 6))
+        body = ttk.Frame(tab)
+        body.pack(fill="both", expand=True)
+
+        left = ttk.Frame(body)
+        left.pack(side="left", fill="y")
+        self.day_tree = ttk.Treeview(left, columns=("day", "n"), show="headings", selectmode="browse", height=20)
+        self.day_tree.heading("day", text="보고일")
+        self.day_tree.heading("n", text="건수")
+        self.day_tree.column("day", width=130, anchor="center", stretch=False)
+        self.day_tree.column("n", width=56, anchor="center", stretch=False)
+        dsb = ttk.Scrollbar(left, orient="vertical", command=self.day_tree.yview)
+        self.day_tree.configure(yscrollcommand=dsb.set)
+        dsb.pack(side="right", fill="y")
+        self.day_tree.pack(side="left", fill="y")
+        self.day_tree.bind("<<TreeviewSelect>>", lambda e: self._show_history_day())
+
+        right = ttk.Frame(body)
+        right.pack(side="left", fill="both", expand=True, padx=(10, 0))
+        self.rec_tree = ttk.Treeview(right, columns=("time", "source", "title"), show="headings", selectmode="extended")
+        for col, head, width, stretch in (("time", "기록 시각", 80, False), ("source", "매체", 130, False),
+                                          ("title", "제목 (더블클릭: 기사 열기)", 600, True)):
+            self.rec_tree.heading(col, text=head)
+            self.rec_tree.column(col, width=width, stretch=stretch, anchor="center" if col == "time" else "w")
+        self.rec_tree.tag_configure("odd", background="#F3F6F9")
+        rsb = ttk.Scrollbar(right, orient="vertical", command=self.rec_tree.yview)
+        self.rec_tree.configure(yscrollcommand=rsb.set)
+        rsb.pack(side="right", fill="y")
+        self.rec_tree.pack(side="left", fill="both", expand=True)
+        self.rec_tree.bind("<Double-1>", self._open_history_item)
+
+        bottom = ttk.Frame(tab)
+        bottom.pack(fill="x", pady=(6, 0))
+        ttk.Button(bottom, text="이 날 보고서 다시 열기 (메일용)", command=self._reopen_history_report).pack(side="left")
+        ttk.Button(bottom, text="새로고침", command=self._refresh_history).pack(side="left", padx=6)
+        ttk.Button(bottom, text="선택한 기사 기록 취소", command=self._remove_history_items).pack(side="right")
+        self.history_days: dict[str, list[tuple[str, dict]]] = {}
+        self._refresh_history()
+
+    def _refresh_history(self, select_day: str | None = None):
+        keep = (select_day,) if select_day else self.day_tree.selection()
+        self.history_days = history.by_date(history.load())
+        self.day_tree.delete(*self.day_tree.get_children())
+        for day, items in self.history_days.items():
+            d = dt.date.fromisoformat(day)
+            self.day_tree.insert("", "end", iid=day, values=(f"{day} ({'월화수목금토일'[d.weekday()]})", len(items)))
+        if keep and self.day_tree.exists(keep[0]):
+            self.day_tree.selection_set(keep[0])
+        elif self.history_days:
+            self.day_tree.selection_set(next(iter(self.history_days)))
+        self._show_history_day()
+
+    def _history_day(self) -> str | None:
+        sel = self.day_tree.selection()
+        return sel[0] if sel else None
+
+    def _show_history_day(self):
+        self.rec_tree.delete(*self.rec_tree.get_children())
+        day = self._history_day()
+        for i, (link, rec) in enumerate(self.history_days.get(day, [])):
+            self.rec_tree.insert("", "end", iid=link, values=(rec["time"], rec["source"], rec["title"] or link),
+                                 tags=("odd",) if i % 2 else ())
+
+    def _history_record(self, link: str) -> dict | None:
+        return next((r for l, r in self.history_days.get(self._history_day(), []) if l == link), None)
+
+    def _open_history_item(self, event):
+        link = self.rec_tree.identify_row(event.y)
+        rec = self._history_record(link) if link else None
+        if rec is None:
+            return
+        self._open_article(Article(rec["title"], rec["url"] or link, "", rec["source"],
+                                   dt.datetime.now(KST), ""))
+
+    def _reopen_history_report(self):
+        day = self._history_day()
+        if not day or not self.history_days.get(day):
+            messagebox.showinfo("보고 기록", "왼쪽에서 날짜를 고르세요.")
+            return
+        arts = []
+        for link, rec in self.history_days[day]:
+            when = dt.datetime.fromisoformat(f"{day} {rec['time'] or '09:00'}").replace(tzinfo=KST)
+            arts.append(Article(rec["title"] or link, rec["url"] or link, "", rec["source"], when, ""))
+
+        def work():
+            links = google_news.resolve_links([a.link for a in arts])
+            items = [dataclasses.replace(a, link=links.get(a.link, a.link)) for a in arts]
+            self.after(0, done, items)
+
+        def done(items):
+            subject = report.mail_subject(self.cfg.get("mail_subject", report.DEFAULT_SUBJECT),
+                                          dt.date.fromisoformat(day))
+            path = report.save_report("", subject=subject, simple_html=report.build_simple_html(items))
+            webbrowser.open("file:///" + path.replace("\\", "/"))
+            self._set_status(f"{day} 보고서 다시 열기: {len(items)}건")
+
+        self._set_status("기사 원문 주소 확인 중…")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _remove_history_items(self):
+        links = list(self.rec_tree.selection())
+        if not links:
+            messagebox.showinfo("기록 취소", "오른쪽 표에서 취소할 기사를 고르세요 (Ctrl·Shift 로 여러 개).")
+            return
+        if not messagebox.askyesno("기록 취소", f"선택한 {len(links)}건의 보고 기록을 지울까요?\n"
+                                   "지우면 다음 조회에 다시 나옵니다."):
+            return
+        n = history.remove(links)
+        self._refresh_history()
+        self._set_status(f"보고 기록 {n}건 취소")
+
     # ------------------------------------------------------------ 설정 ↔ 화면
     def _load_config_into_ui(self):
         self._set_auto_period()
@@ -347,7 +472,7 @@ class App(tk.Tk):
         start, end = self._auto_period()
         self.start_var.set(start.strftime("%Y-%m-%d %H:%M"))
         self.end_var.set(end.isoformat())
-        self.basic_period_var.set(f"조회 기간: {calendar_kr.describe(start)} ~ 지금  (직전 영업일 9시부터 자동)")
+        self.basic_period_var.set(f"자동 기간 = 직전 영업일 9시부터 ({calendar_kr.describe(start)} ~ 지금)")
 
     def _set_period(self, days_back: int):
         today = dt.date.today()
@@ -366,8 +491,6 @@ class App(tk.Tk):
     def _search(self, mode: str):
         if self.searching:
             return
-        if mode == "basic":
-            self._set_auto_period()  # 베이직은 언제나 자동 기간
         try:
             start = parse_start(self.start_var.get())
             end = parse_date(self.end_var.get())
@@ -777,8 +900,17 @@ class App(tk.Tk):
         if not messagebox.askyesno("보고 완료", f"선택된 {len(selected)}건을 보고 완료로 기록할까요?\n"
                                    "다음 조회부터 '이미 보고한 기사 제외'로 걸러집니다."):
             return
-        n = history.mark_sent([link for a in selected for link in a.all_links])
-        self._set_status(f"보고 완료 기록: {n}건 추가")
+        entries = []
+        for a in selected:
+            main = url_key(a)
+            entries.append({"link": main, "title": a.title, "source": a.source, "main": main,
+                            "url": google_news.cached_link(main)})
+            for src, title, link in a.others:  # 같은 사안으로 묶인 기사도 함께(다음 조회에서 걸러지게)
+                entries.append({"link": link, "title": title, "source": src, "main": main})
+        now = dt.datetime.now(KST)
+        n = history.mark_sent(entries, when=now)
+        self._refresh_history(select_day=now.date().isoformat())
+        self._set_status(f"보고 완료 기록: {n}건 추가 → [보고 기록] 탭에서 날짜별로 볼 수 있습니다")
 
     # -------------------------------------------------------- 업데이트
     def _check_update_silently(self):

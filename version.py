@@ -4,7 +4,7 @@
 GitHub Actions가 이 값을 읽어 'v0.1.0' 같은 태그로 Release를 만든다.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 APP_NAME = "NewsMonitor"
 APP_TITLE = "언론보도 모니터링"

@@ -199,6 +199,7 @@ def save_report(body_html: str, when: dt.datetime | None = None,
     """reports/ 폴더에 저장하고 파일 경로를 돌려준다.
 
     subject(메일 제목)와 simple_html(기존 양식 본문)이 있으면 복사 버튼을 단다.
+    body_html 이 비어 있으면 ① 기존 양식만 싣는다(보고 기록에서 다시 열 때).
     """
     os.makedirs(REPORT_DIR, exist_ok=True)
     when = when or dt.datetime.now()
@@ -225,12 +226,14 @@ def save_report(body_html: str, when: dt.datetime | None = None,
             f'onclick="copyHtml(\'body-simple\', this)">본문 복사</button>'
             f'<div id="body-simple">{simple_html}</div></div>'
         )
+    if simple_html and body_html:
         parts.append(
             f'<div style="{_BOX}"><span style="{_LABEL}">메일 본문 ② 분류·인사이트 포함</span><br>'
             f'<button type="button" style="{_BTN};margin:6px 0 12px 0" '
             f'onclick="copyHtml(\'body-full\', this)">본문 복사</button>'
             f'<div id="body-full">{body_html}</div></div>'
         )
+    if simple_html:
         parts.append(_PAGE_SCRIPT)
     else:
         parts.append(
