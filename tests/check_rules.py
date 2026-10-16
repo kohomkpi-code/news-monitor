@@ -99,7 +99,28 @@ print("13", "통과" if ok13 else "실패", dict(c))
 results.append(ok13)
 
 # 매칭 규칙
-assert rules.matches("군 관사", "육군 군관사 노후") and rules.matches("공동주택 관리비", "관리비 오른 공동주택")
+assert rules.matches("군 관사", "육군 군관사 노후") and rules.matches("공동주택 관리비", "서울 공동주택 관리비 공개")
+# v1.0.1 ⑩ 여러 낱말 키워드: 같은 순서, 낱말 사이 20자 이내
+assert not rules.matches("공동주택 관리비", "관리비 오른 공동주택")
+assert not rules.matches("임대주택 노후", "노후 기업 사택 활용해 임대주택 30가구 공급")
+assert rules.match_span("공공임대 입주", "LH, 공공임대 아파트 신규 입주자 모집") == "공공임대 아파트 신규 입주"
+assert not rules.matches("공공임대 입주", "공공임대 " + "가" * 21 + " 입주")
+# ⑧ 해외 한인 매체 제외 (영문은 낱말로만)
+em = r["exclude_media"]
+assert rules.media_hit(em, "SeattleN", "https://news.google.com/rss/articles/CBMiLA") == "SeattleN"
+assert rules.media_hit(em, "LA중앙일보", "") == "LA" and rules.media_hit(em, "Platum", "") is None
+assert rules.media_hit(em, "한국경제", "https://www.hankyung.com/la/1") is None
+# ⑨ 짧은 약칭: 'Sh수협은행'은 B 에 안 걸림, 'SH공사 임대주택'은 걸림
+kh = ranking.keyword_hits(art("Sh수협은행 소상공인 혜택", desc="임대주택 입주민도 대상"), r)
+assert not (kh["A"] + kh["S"] + kh["B"]), kh
+assert ranking.keyword_hits(art("SH공사, 임대주택 하자 보수 지연"), r)["B"] == ["SH공사 임대주택"]
+# 저장된 v1.0.0 규칙에 갱신분 보태기
+old = rules.normalize(None); old["kw_b"] = [k for k in old["kw_b"] if "도시공사" not in k and "SH공사" not in k] + ["SH 임대주택", "iH 주거복지", "내 키워드"]
+old["exclude_media"] = ["vietnam.vn", "내 매체"]
+up = rules.upgrade(old, 1)
+assert up["kw_b"][-4:] == ["SH공사 임대주택", "서울주택도시공사 임대주택", "인천도시공사 주거복지", "내 키워드"], up["kw_b"][-4:]
+assert "내 매체" in up["exclude_media"] and "SeattleN" in up["exclude_media"] and rules.upgrade(up, 1) == up
+print("v1.0.1 OK:", rules.diff(old, up))
 assert not rules.matches("분양 -분양전환", "임대 분양전환 가격") and rules.matches("분양 -분양전환", "LH 분양 일정")
 assert rules.google_query("공동주택 관리비", True) == '"공동주택" "관리비"' and rules.google_query("군 관사", True) == '"군 관사"'
 assert rules.google_query("주택관리공단 OR 마이홈", True) == "주택관리공단 OR 마이홈"

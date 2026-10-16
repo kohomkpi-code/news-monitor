@@ -33,8 +33,12 @@ def evaluate(a: Article, r: dict, now: dt.datetime) -> None:
     """점수(a.score), 항목별 점수(a.parts), 걸린 말(a.hits), 자동 분류(a.auto_category)를 채운다."""
     t = a.title
     kh = keyword_hits(a, r)
-    h = {"S": kh["S"], "모회사": R.hits(r["parent_words"], t), "리스크": R.hits(r["risk_words"], t),
-         "정책": R.hits(r["policy_words"], t), "개발": R.hits(r["dev_words"], t), "행사": R.hits(r["event_words"], t)}
+    text = f"{t} {a.description}" if r["check_summary"] else t
+    h = {"A": kh["A"], "S": kh["S"], "B": kh["B"], "모회사": R.hits(r["parent_words"], t),
+         "리스크": R.hits(r["risk_words"], t), "정책": R.hits(r["policy_words"], t), "개발": R.hits(r["dev_words"], t),
+         "행사": R.hits(r["event_words"], t),
+         # 키워드가 맞은 구간(원래 글 그대로) — 점수 근거에 보여 준다
+         "구간": {**R.spans(kh["A"], t), **R.spans(kh["S"] + kh["B"], text)}}
     a.hits = h
     is_a, s, parent = bool(kh["A"]), kh["S"], bool(h["모회사"])
     policy_ok = bool(h["정책"]) and (bool(s) or parent or bool(R.hits(r["policy_context"], t)))
@@ -74,14 +78,22 @@ def evaluate(a: Article, r: dict, now: dt.datetime) -> None:
 
 
 def score_line(a: Article) -> str:
-    """점수 근거 한 줄: 'A 기관 50 + S 사업어 30(영구임대) + 리스크 20(고독사) = 100'."""
-    words = {"S 사업어": a.hits.get("S"), "모회사·부처": a.hits.get("모회사"), "리스크": a.hits.get("리스크"),
-             "정책": a.hits.get("정책"), "공급·개발": a.hits.get("개발"), "행사": a.hits.get("행사")}
+    """점수 근거 한 줄: 'A 기관 +50(주택관리공단) S 사업어 +30(공공임대 입주「공공임대 아파트 입주」) … = 100'.
+    여러 낱말 키워드는 제목에서 실제로 맞은 구간을 「」 안에 보여 준다."""
+    h = a.hits
+    spans = h.get("구간", {})
+    words = {"A 기관": h.get("A"), "S 사업어": h.get("S"), "B 환경": h.get("B"), "모회사·부처": h.get("모회사"),
+             "리스크": h.get("리스크"), "정책": h.get("정책"), "공급·개발": h.get("개발"), "행사": h.get("행사")}
+
+    def show(w: str) -> str:
+        sp = spans.get(w)
+        return f"{w}「{sp}」" if sp and R._squash(sp) != R._squash(w) else w
+
     bits = []
     for k, v in a.parts.items():
         if v:
             w = words.get(k)
-            bits.append(f"{k} {v:+d}" + (f"({', '.join(w[:3])})" if w else ""))
+            bits.append(f"{k} {v:+d}" + (f"({', '.join(show(x) for x in w[:3])})" if w else ""))
     return " ".join(bits).lstrip("+") + f" = {a.score}"
 
 

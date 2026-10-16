@@ -9,8 +9,8 @@ v1.0 부터 규칙은 코드가 아니라 설정(config.json 의 "rules")에 있
 - A 기관 직접: 제목에 있으면 무조건 후보(+50). 지사명은 같은 제목에 '공단'이 있을 때만 A.
 - S 사업어: 공단 이름이 없어도 공단 업무를 가리키는 말(+30, 2개 이상 +40). 단지명도 S 로 본다.
 - B 환경: 주거·공동주택 정책 환경(+10).
-키워드 맞추기(matches): 띄어 쓴 말은 모두 들어 있으면 맞음(순서·띄어쓰기 무관).
-  '공동주택 관리비' → '공동주택'과 '관리비'가 모두 있으면. 한 글자 낱말('군 관사')은 다음 낱말과 붙여 본다.
+키워드 맞추기(matches): 띄어 쓴 말은 같은 순서로, 낱말 사이 20자 이내에 있으면 맞음(띄어쓰기 무관).
+  '공동주택 관리비' → '공동주택 … 관리비'. 한 글자 낱말('군 관사')은 다음 낱말과 붙여 본다.
   구글식 "따옴표 문구", A OR B, -빼는말 도 그대로 쓸 수 있다.
 """
 
@@ -18,6 +18,7 @@ import copy
 import datetime as dt
 import json
 import re
+from urllib.parse import urlparse
 
 # ------------------------------------------------------------------ 기본 규칙 (v1.0.0)
 DEFAULT_RULES = {
@@ -35,8 +36,8 @@ DEFAULT_RULES = {
     "kw_b": ["LH", "한국토지주택공사", "국토교통부 주거복지", "국토부 임대주택", "주거급여", "공동주택관리법",
              "공공주택특별법", "공동주택 관리비", "승강기 안전", "승강기 검사", "공동주택 화재", "스프링클러", "층간소음",
              "고독사", "돌봄통합", "노후 공공임대", "공공임대 재정비", "주택관리사", "주택관리업자", "공공기관 경영평가",
-             "국토부 산하기관", "국감 LH", "공공기관 청렴도", "중대재해 공공기관", "지방공사 임대주택", "SH 임대주택",
-             "iH 주거복지"],
+             "국토부 산하기관", "국감 LH", "공공기관 청렴도", "중대재해 공공기관", "지방공사 임대주택", "SH공사 임대주택",
+             "서울주택도시공사 임대주택", "인천도시공사 주거복지"],
     # 거르기
     "exact_search": True,       # 구글 뉴스에 따옴표(정확 검색)로 묻기
     "check_summary": True,      # S·B 는 요약까지 확인(A 는 제목만)
@@ -45,7 +46,7 @@ DEFAULT_RULES = {
     "event_words": ["축제", "성료", "성황", "한마당", "바자회", "김장", "나눔 행사", "나눔행사", "봉사활동", "봉사단",
                     "잔치", "플리마켓", "벼룩시장", "발대식", "체육대회", "운동회", "음악회", "연탄", "송년"],
     "exclude_media": ["vietnam.vn", "laodong.vn", "voi.id", "cgtn.com", "unite.ai", "밴쿠버", "미주", "호주 톱뉴스",
-                      "Calgary"],
+                      "Calgary", "SeattleN", "시애틀", "애틀랜타", "뉴욕", "LA", "토론토", "호주", "시카고", "한인"],
     # 점수용 단어
     "parent_words": ["LH", "한국토지주택공사", "국토부", "국토교통부", "국토위"],
     "risk_words": ["사고", "화재", "붕괴", "누수", "사망", "숨져", "감사 -감사패 -감사장", "징계", "비위", "비리", "횡령", "소송",
@@ -79,7 +80,7 @@ LIST_FIELDS = {
     "kw_b": ("B 환경", "주거·공동주택 정책 환경"),
     "exclude_words": ("제외어", "제목에 있으면 제외 · B에만(A·S는 예외)"),
     "event_words": ("단순 행사어", "A는 감점, 나머지는 제외"),
-    "exclude_media": ("제외 매체", "매체명·주소에 들어 있으면 제외"),
+    "exclude_media": ("제외 매체", "매체명(영문은 낱말로)·주소에 있으면 제외"),
     "parent_words": ("모회사·부처어", "LH·국토부 등"),
     "risk_words": ("리스크어", "A·S·모회사어와 함께 있을 때만 가점"),
     "policy_words": ("정책어", "S·모회사어·조건어와 함께 있을 때만 가점"),
@@ -107,6 +108,40 @@ TEXT_FIELDS = {"kw_a_branch_with": ("지사명과 함께 있어야 하는 말", 
 CATEGORIES = ["리스크", "기관 직접", "모회사·부처", "정책·제도", "공공기관 공통", "업계·환경"]
 
 RULES_FORMAT = "kohom-newsroom-rules"
+RULES_VERSION = 2  # 기본 규칙을 고쳐 이미 저장된 규칙에도 보태야 할 때 올린다(upgrade)
+
+
+def upgrade(r: dict, from_version: int) -> dict:
+    """저장된 규칙에 새 버전의 기본 규칙 수정분을 보탠다(사용자가 고친 것은 그대로).
+    v2(1.0.1): 해외 한인 매체 제외 추가, 짧은 약칭 SH·iH 를 기관 이름으로(‘Sh수협은행’이 걸려서)."""
+    r = copy.deepcopy(r)
+    if from_version < 2:
+        swap = {"SH 임대주택": ["SH공사 임대주택", "서울주택도시공사 임대주택"], "SH": ["SH공사", "서울주택도시공사"],
+                "iH 주거복지": ["인천도시공사 주거복지"], "iH": ["인천도시공사"]}
+        r["kw_b"] = list(dict.fromkeys(x for k in r["kw_b"] for x in swap.get(k, [k])))
+        r["exclude_media"] += [m for m in ["SeattleN", "시애틀", "애틀랜타", "뉴욕", "LA", "토론토", "호주", "시카고", "한인"]
+                               if m not in r["exclude_media"]]
+    return r
+
+
+def media_hit(entries: list[str], source: str, link: str) -> str | None:
+    """제외 매체 목록에 걸리면 그 말. 주소 꼴('vietnam.vn')은 매체명·주소에서,
+    영문('LA')은 매체명에서 낱말로만(‘Platum’의 la 는 아님), 한글은 매체명 안에 들어 있으면."""
+    src = (source or "").lower()
+    host = urlparse(link or "").netloc.lower()
+    for m in entries:
+        ml = m.lower().strip()
+        if not ml:
+            continue
+        if "." in ml:
+            if ml in host or ml in src:
+                return m
+        elif re.fullmatch(r"[a-z0-9 ]+", ml):
+            if re.search(rf"(?<![a-z]){re.escape(ml)}(?![a-z])", src):
+                return m
+        elif ml in src:
+            return m
+    return None
 
 
 def normalize(saved: dict | None) -> dict:
@@ -132,6 +167,7 @@ def normalize(saved: dict | None) -> dict:
 
 # ------------------------------------------------------------------ 키워드 맞추기
 _TOKEN_RE = re.compile(r'-?"[^"]+"|\S+')
+MAX_GAP = 20  # 여러 낱말 키워드: 앞 낱말이 끝난 뒤 이 글자 수(띄어쓰기 빼고) 안에 다음 낱말이 있어야 맞음
 
 
 def _squash(text: str) -> str:
@@ -160,14 +196,63 @@ def _parts(alt: str) -> tuple[list[str], list[str]]:
     return must, must_not
 
 
-def matches(keyword: str, text: str) -> bool:
-    """키워드가 글에 맞는지. 대소문자·띄어쓰기는 가리지 않는다."""
-    text = _squash(text)
+def _squash_map(text: str) -> tuple[str, list[int]]:
+    """띄어쓰기를 빼고 소문자로 바꾼 글 + 글자마다 원래 글에서의 위치."""
+    out, idx = [], []
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            continue
+        for c in ch.lower():
+            out.append(c)
+            idx.append(i)
+    return "".join(out), idx
+
+
+def _in_order(s: str, parts: list[str]) -> tuple[int, int] | None:
+    """parts 가 이 순서로, 앞 낱말 끝에서 MAX_GAP 글자 안에 다음 낱말이 있는 첫 구간 (시작, 끝)."""
+    pos = s.find(parts[0])
+    while pos != -1:
+        end, ok = pos + len(parts[0]), True
+        for p in parts[1:]:
+            nxt = s.find(p, end)
+            if nxt == -1 or nxt - end > MAX_GAP:
+                ok = False
+                break
+            end = nxt + len(p)
+        if ok:
+            return pos, end
+        pos = s.find(parts[0], pos + 1)
+    return None
+
+
+def match_span(keyword: str, text: str) -> str | None:
+    """키워드가 글에 맞으면 맞은 구간(원래 글 그대로), 아니면 None.
+    여러 낱말 키워드는 같은 순서로, 낱말 사이가 MAX_GAP 글자 이내일 때만 맞음
+    ('임대주택 노후'는 '노후 기업 사택 활용해 임대주택'에 안 맞음). 대소문자·띄어쓰기는 가리지 않는다."""
+    s, idx = _squash_map(text)
     for alt in re.split(r"\s+OR\s+", keyword.strip()):
         must, must_not = _parts(alt)
-        if must and all(m in text for m in must) and not any(n in text for n in must_not):
-            return True
-    return False
+        if not must or any(n in s for n in must_not):
+            continue
+        found = _in_order(s, must)
+        if found:
+            b, e = found
+            return text[idx[b]: idx[e - 1] + 1]
+    return None
+
+
+def matches(keyword: str, text: str) -> bool:
+    return match_span(keyword, text) is not None
+
+
+def spans(words: list[str], text: str) -> dict[str, str]:
+    """걸린 말 → 맞은 구간 (점수 근거에 보여 줄 것)."""
+    out = {}
+    for w in words:
+        sp = match_span(w, text)
+        if sp is not None:
+            out[w] = sp
+    return out
 
 
 def hits(words: list[str], text: str) -> list[str]:

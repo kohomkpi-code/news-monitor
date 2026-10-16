@@ -10,6 +10,7 @@
 - extra_feeds: 추가 RSS 매체 [{"name", "url", "on"}]. [설정] 탭 → [전문지 고르기]에서 고친다.
 """
 
+import datetime as dt
 import json
 import os
 import sys
@@ -24,6 +25,7 @@ DEFAULT_CONFIG = {
     "keywords_version": 3,     # 기본 키워드 체계가 바뀌면 올린다(v1.0.0: A·S·B 3단 → rules)
     "feeds_version": 2,        # 기본 전문지 목록이 바뀌면 올린다(v0.9.2: 전기신문 제외)
     "rules": rules.DEFAULT_RULES,
+    "rules_version": rules.RULES_VERSION,
     "rules_log": [],
     "keywords": [],            # 검색 키워드 전체 A→S→B (자동)
     "exclude_events": True,    # 단순 행사 기사 제외 (A 는 빼지 않고 감점)
@@ -92,6 +94,15 @@ def load() -> dict:
         saved["feeds_version"] = DEFAULT_CONFIG["feeds_version"]
     cfg.update(saved)
     cfg["rules"] = rules.normalize(cfg.get("rules"))
+    if saved.get("rules") is not None and saved.get("rules_version", 1) < rules.RULES_VERSION:
+        # 새 버전의 기본 규칙 수정분을 저장된 규칙에 보태고, 무엇이 바뀌었는지 변경 이력에 남긴다
+        new = rules.upgrade(cfg["rules"], saved.get("rules_version", 1))
+        changes = rules.diff(cfg["rules"], new)
+        if changes:
+            cfg["rules_log"] = list(cfg.get("rules_log", [])) + [
+                rules.log_entry(changes, f"앱 업데이트(규칙 v{rules.RULES_VERSION})", dt.datetime.now())]
+        cfg["rules"] = new
+        cfg["rules_version"] = rules.RULES_VERSION
     cfg["keywords"] = all_keywords(cfg)
     return cfg
 

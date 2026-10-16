@@ -785,7 +785,7 @@ class App(tk.Tk):
                 self.rule_nums[key] = v
 
         body = section("① 검색 키워드", "이 말들로 기사를 찾고, 제목에 실제로 들어 있는지 다시 확인합니다(구글은 검색어가 없는 "
-                                      "기사도 주기 때문). 띄어 쓴 말은 모두 들어 있으면 맞음 · \"따옴표\"는 그대로 · "
+                                      "기사도 주기 때문). 띄어 쓴 말은 같은 순서로 20자 안에 있으면 맞음 · \"따옴표\"는 그대로 · "
                                       "A OR B · -빼는말. 한 줄에 하나.")
         lists(body, ["kw_a", "kw_s", "kw_b"], height=9)
         lists(body, ["kw_a_branch", "complex_names", "exclude_words"], height=5)
@@ -1422,8 +1422,7 @@ class App(tk.Tk):
 
         # ① 제외 매체(해외·무관 매체)
         media = r["exclude_media"]
-        found = keep(found, lambda a: next((m for m in media if m.lower() in f"{a.source} {a.link}".lower()), None),
-                     "제외 매체")
+        found = keep(found, lambda a: rules.media_hit(media, a.source, a.link), "제외 매체")
 
         # ② 제목 검증: 구글은 검색어가 제목에 없어도 관련 기사를 준다 → 걸린 키워드를 제목(요약)으로 다시 확인
         def verify(a: Article):
@@ -1523,6 +1522,10 @@ class App(tk.Tk):
                + f" → 표시 {len(found)}건 (A {count('A')} · S {count('S')} · B {count('B')})"
                + (f" · ★추천 {n_best}건" if n_best >= self.cfg["rules"]["best_count"]
                   else f" · 오늘은 ★추천 {n_best}건 (기준 {self.cfg['rules']['min_score']}점 이상)"))
+        n_risk = sum(1 for a in found if a.grade != "직접" and a.auto_category == "리스크")
+        risk_best = sum(1 for a in best if a.grade != "직접" and a.auto_category == "리스크")
+        if n_risk > risk_best:
+            msg += f" · 리스크 {n_risk}건 중 {risk_best}건 추천 — 나머지는 표에서 확인"
         if feed_failed:
             msg += f" · 전문지 조회 실패: {', '.join(feed_failed)}"
         self._set_step(2)
