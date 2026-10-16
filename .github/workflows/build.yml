@@ -52,7 +52,7 @@ jobs:
 
       - name: exe 만들기
         if: steps.ver.outputs.exists == 'false'
-        run: pyinstaller --onefile --windowed --name NewsMonitor app.py
+        run: pyinstaller --onefile --windowed --name NewsMonitor --add-data "assets/fonts;assets/fonts" app.py
 
       - name: 자동 업데이트 교체 시험 (실패하면 배포 중단)
         if: steps.ver.outputs.exists == 'false'
