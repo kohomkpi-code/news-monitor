@@ -4,7 +4,7 @@
   RSS(최신 기사 목록)를 직접 받는다. 매체·주소·사용 여부는 [설정] 탭 → [전문지 고르기]에서
   정한다(config.json 의 "extra_feeds": [{"name", "url", "on"}]).
 - 전문지 RSS 는 '검색'이 아니라 '최신 글 전체'라서, 제목이나 요약에
-  A/B 키워드가 들어간 기사만 남긴다.
+  검색 키워드(A·S·B)가 들어간 기사만 남긴다.
 - 키워드 맞추기 규칙(구글 검색과 비슷하게):
     LH 임대주택        → 'LH' 와 '임대주택' 이 모두 들어 있으면
     "공공임대 관리"     → 이 문구가 그대로 들어 있으면
@@ -23,24 +23,16 @@ from urllib.parse import urlparse
 import requests
 
 import rss
+import rules
 from naver_api import Article, NaverApiError
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NewsMonitor"}
 RSS_PATH = "/rss/allArticle.xml"
-_TOKEN_RE = re.compile(r'-?"[^"]+"|\S+')
 
 
 def keyword_matches(keyword: str, text: str) -> bool:
-    """구글 검색식 키워드가 글(text)에 맞는지. 대소문자는 가리지 않는다."""
-    text = text.lower()
-    for alt in re.split(r"\s+OR\s+", keyword.strip()):
-        tokens = _TOKEN_RE.findall(alt)
-        must = [t.strip('"').lower() for t in tokens if not t.startswith("-")]
-        must_not = [t[1:].strip('"').lower() for t in tokens if t.startswith("-") and len(t) > 1]
-        must = [m for m in must if m]
-        if must and all(m in text for m in must) and not any(n in text for n in must_not):
-            return True
-    return False
+    """구글 검색식 키워드가 글(text)에 맞는지(rules.matches: 대소문자·띄어쓰기 무시)."""
+    return rules.matches(keyword, text)
 
 
 def _fetch_raw(name: str, url: str, timeout: int = 15) -> bytes:
@@ -138,7 +130,7 @@ def filter_items(items: list[rss.RssItem], feed_name: str, grades: dict[str, str
             published=it.published,
             description=it.description,
             keywords=matched,
-            grade="A" if any(grades[k] == "A" for k in matched) else "B",
+            grade=next((g for g in ("A", "S", "B") if any(grades[k] == g for k in matched)), "B"),
         ))
     return out
 

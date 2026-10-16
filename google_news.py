@@ -67,8 +67,9 @@ def parse_rss(xml_text: str | bytes, keyword: str) -> list[Article]:
     return out
 
 
-def _fetch(keyword: str, start_date: dt.date, end_date: dt.date) -> list[Article]:
-    params = {"q": build_query(keyword, start_date, end_date), "hl": "ko", "gl": "KR", "ceid": "KR:ko"}
+def _fetch(keyword: str, start_date: dt.date, end_date: dt.date, query: str | None = None) -> list[Article]:
+    """query: 구글에 물을 검색어(정확 검색 따옴표 등). 없으면 키워드 그대로."""
+    params = {"q": build_query(query or keyword, start_date, end_date), "hl": "ko", "gl": "KR", "ceid": "KR:ko"}
     try:
         resp = requests.get(RSS_URL, params=params, headers=HEADERS, timeout=15)
     except requests.exceptions.SSLError as e:
@@ -84,19 +85,21 @@ def _fetch(keyword: str, start_date: dt.date, end_date: dt.date) -> list[Article
 
 
 def _search_range(keyword: str, start_date: dt.date, end_date: dt.date, depth: int,
-                  split: bool = True) -> list[Article]:
-    items = _fetch(keyword, start_date, end_date)
+                  split: bool = True, query: str | None = None) -> list[Article]:
+    items = _fetch(keyword, start_date, end_date, query)
     if split and len(items) >= PAGE_LIMIT and start_date < end_date and depth < MAX_SPLIT_DEPTH:
         mid = start_date + (end_date - start_date) // 2
-        return (_search_range(keyword, start_date, mid, depth + 1)
-                + _search_range(keyword, mid + dt.timedelta(days=1), end_date, depth + 1))
+        return (_search_range(keyword, start_date, mid, depth + 1, query=query)
+                + _search_range(keyword, mid + dt.timedelta(days=1), end_date, depth + 1, query=query))
     return items
 
 
-def search_news(keyword: str, start_date: dt.date, end_date: dt.date, split: bool = True) -> list[Article]:
-    """키워드 하나로 기간(한국시간 기준) 내 기사를 가져온다. split=False 면 한 번만 묻는다."""
+def search_news(keyword: str, start_date: dt.date, end_date: dt.date, split: bool = True,
+                query: str | None = None) -> list[Article]:
+    """키워드 하나로 기간(한국시간 기준) 내 기사를 가져온다. split=False 면 한 번만 묻는다.
+    query 를 주면 구글에는 그것으로 묻는다(예: 정확 검색 '"영구임대"'). 기사의 키워드는 keyword."""
     results, seen = [], set()
-    for art in _search_range(keyword, start_date, end_date, 0, split):
+    for art in _search_range(keyword, start_date, end_date, 0, split, query):
         if not (start_date <= art.published.date() <= end_date):
             continue
         if art.link in seen:  # 기간을 나눠 물으면 경계에서 겹칠 수 있다

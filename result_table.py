@@ -17,7 +17,7 @@ import theme
 from naver_api import Article
 from report import CATEGORY_ORDER
 
-GRADE_ORDER = {"직접": 0, "A": 1, "B": 2}
+GRADE_ORDER = {"직접": 0, "A": 1, "S": 2, "B": 3}
 
 # 열 id → (머리글, 폭, 가운데 정렬, 늘어남)  — 명세 5장 열 폭
 COLUMN_DEFS = {
@@ -79,7 +79,7 @@ class ResultTable:
         cell = {
             "grade": a.grade,
             "score": a.score,
-            "category": a.category,
+            "category": a.shown_category,
             "keyword": ", ".join(a.keywords),
             "date": a.published.strftime("%m.%d %H:%M"),
             "source": a.source_label,
@@ -180,15 +180,15 @@ class ResultTable:
 
     def _sort_key(self, col: str):
         if col == "grade":
-            # 등급 → 그 안에서는 키워드 우선순위(키워드 칸에 적힌 순서)
-            return lambda a: (GRADE_ORDER.get(a.grade, 9), self._main_rank(a))
+            # 등급(직접→A→S→B) → 그 안에서는 점수 높은 순
+            return lambda a: (GRADE_ORDER.get(a.grade, 9), -a.score)
         if col == "best":
             return lambda a: (0 if a.grade == "직접" else 1 if a.best else 2, -a.score)
         if col == "score":
             return lambda a: a.score
         if col == "category":
-            return lambda a: (CATEGORY_ORDER.index(a.category) if a.category in CATEGORY_ORDER
-                              else len(CATEGORY_ORDER) if a.category else len(CATEGORY_ORDER) + 1)
+            return lambda a: (CATEGORY_ORDER.index(a.shown_category) if a.shown_category in CATEGORY_ORDER
+                              else len(CATEGORY_ORDER) if a.shown_category else len(CATEGORY_ORDER) + 1, -a.score)
         if col == "keyword":
             return self._main_rank
         if col == "date":

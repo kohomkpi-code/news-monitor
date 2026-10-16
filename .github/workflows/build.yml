@@ -50,6 +50,12 @@ jobs:
         if: steps.ver.outputs.exists == 'false'
         run: python -m py_compile *.py
 
+      - name: 선정 기준 검증 (실제 제목 14개, 실패하면 배포 중단)
+        if: steps.ver.outputs.exists == 'false'
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python tests/check_rules.py
+
       - name: exe 만들기
         if: steps.ver.outputs.exists == 'false'
         run: pyinstaller --onefile --windowed --name NewsMonitor --add-data "assets/fonts;assets/fonts" app.py

@@ -3,51 +3,38 @@
 - 설정 파일은 exe(또는 app.py)와 같은 폴더에 생긴다.
 - 네이버 Client ID/Secret 은 이 파일에만 저장되고 GitHub 에는 올라가지 않는다(.gitignore).
 - source: 기사 출처. "google"(구글 뉴스, 키 불필요) 또는 "naver"(네이버, 키 필요).
-- keywords_a(기관 직접, 무조건 후보) / keywords_b(정책·환경, 후보) 두 등급으로 나눈다.
-  B 는 담당자가 수기로 검색하던 목록이고, 적힌 순서가 우선순위다(표 정렬·AI 요청문 순서).
-  B 키워드로 찾은 기사라도 제목·요약에 A 키워드가 있으면 A 로 올린다.
-  예전 "keywords" 는 두 목록을 합친 값으로 자동으로 맞춘다(하위 호환).
-- extra_feeds: 전문지 RSS 목록 [{"name", "url", "on"}]. [설정] 탭 → [전문지 고르기]에서 고친다.
-- event_words: 단순 행사 기사를 거르는 단어(제목에 있으면 A 등급이라도 뺀다). [설정]에서 고친다.
+- rules: 선정 규칙(키워드 A·S·B, 제외어, 점수, 추천 …). 기본값과 설명은 rules.py, [선정 규칙] 탭에서 고친다.
+  rules_log: 규칙을 바꾼 이력(언제, 어떻게, 무엇을). "keywords" 는 검색 키워드 전체(A→S→B, 자동).
+- v1.0.0 에서 예전 키워드(keywords_a/b)·제외어·행사 단어·추천 건수를 rules 로 옮겼다.
+  키워드는 새 3단 기본값으로 바꾸고, 예전 A·B 목록은 keywords_backup_v2 에 남겨 둔다.
+- extra_feeds: 추가 RSS 매체 [{"name", "url", "on"}]. [설정] 탭 → [전문지 고르기]에서 고친다.
 """
 
 import json
 import os
 import sys
 
+import rules
 from calendar_kr import DEFAULT_HOLIDAYS
 
 DEFAULT_CONFIG = {
     "source": "google",        # google | naver
     "client_id": "",
     "client_secret": "",
-    "keywords_version": 2,
-    "feeds_version": 2,        # 기본 전문지 목록이 바뀌면 올린다(v0.9.2: 전기신문 제외)     # 기본 키워드 목록이 바뀌면 올린다(옛 목록을 새 기본값으로 교체)
-    "keywords_a": ["주택관리공단"],
-    "keywords_b": [
-        "주택관리", "LH", "한국토지주택공사", "공기업", "공공기관", "국토교통부", "국토교통위원회",
-        "공정거래위원회", "동반성장", "국정감사", "경영평가", "주거복지", "SH공사", "도시공사",
-        "기획재정부", "재정경제부", "기획예산처", "감사원", "거버넌스", "재정건전성", "부채비율",
-        "영구임대", "임대아파트", "아파트 관리비", "취약계층", "임차인",
-    ],
-    "b_max_per_keyword": 50,   # B 키워드 하나당 최대 건수(구글이 주는 순서대로). A 는 제한 없음
-    "keywords": [],            # keywords_a + keywords_b (자동)
-    "exclude_words": ["분양", "청약", "시세", "투자", "주식", "매매", "전세사기 피해지원 신청"],
-    "exclude_events": True,    # 단순 행사 기사 제외 (A 등급에도 적용)
-    "event_words": [
-        "축제", "성료", "성황", "한마당", "바자회", "김장", "나눔 행사", "나눔행사", "봉사활동", "봉사단",
-        "잔치", "플리마켓", "벼룩시장", "발대식", "체육대회", "운동회", "음악회", "연탄", "송년",
-    ],
+    "keywords_version": 3,     # 기본 키워드 체계가 바뀌면 올린다(v1.0.0: A·S·B 3단 → rules)
+    "feeds_version": 2,        # 기본 전문지 목록이 바뀌면 올린다(v0.9.2: 전기신문 제외)
+    "rules": rules.DEFAULT_RULES,
+    "rules_log": [],
+    "keywords": [],            # 검색 키워드 전체 A→S→B (자동)
+    "exclude_events": True,    # 단순 행사 기사 제외 (A 는 빼지 않고 감점)
     "use_feeds": True,         # 전문지 RSS 함께 조회
     "extra_feeds": [
         {"name": "아파트관리신문", "url": "https://www.aptn.co.kr/rss/allArticle.xml", "on": True},
         {"name": "한국아파트신문", "url": "https://www.hapt.co.kr/rss/allArticle.xml", "on": True},
     ],
     "days_back": 2,            # (v0.6 부터 안 씀: 조회 기간은 '직전 영업일 9시~'로 자동)
-    "best_count": 5,           # 베이직 탭 추천 건수
     "holidays": DEFAULT_HOLIDAYS,  # 공휴일 — 자동 조회 기간 계산용([설정] 탭에서 수정)
     "last_tab": "basic",       # 마지막으로 본 탭
-    "keywords_collapsed": False,  # 프로 탭 키워드 글상자 접힘
     "last_search_at": "",      # 마지막 조회 시각
     "exclude_sent": True,      # 이미 보고한 기사 제외
     "merge_similar": True,     # 제목이 거의 같은 기사 묶기
@@ -81,22 +68,37 @@ def load() -> dict:
         # 출처·네이버 키·체크 옵션 같은 나머지는 그대로 살린다.
         for key in ("keywords", "exclude_words", "days_back", "report_title"):
             saved.pop(key, None)
-    if saved and saved.get("keywords_version", 1) < DEFAULT_CONFIG["keywords_version"]:
-        # 기본 키워드 목록이 바뀜(v0.5.0: 담당자 수기 검색 목록) → A·B 를 새 기본값으로
-        for key in ("keywords_a", "keywords_b", "keywords", "keywords_version"):
+    if saved and saved.get("keywords_version", 1) < 2:
+        # v0.5.0: 담당자 수기 검색 목록으로 바뀜 → 그 전 A·B 는 버린다
+        for key in ("keywords_a", "keywords_b", "keywords"):
             saved.pop(key, None)
+    if saved and "rules" not in saved:
+        # v1.0.0: 규칙을 rules 로 모음. 키워드는 새 3단 기본값, 제외어·행사 단어·추천 건수는 쓰던 값을 옮긴다.
+        r = rules.normalize(None)
+        for old, new in (("exclude_words", "exclude_words"), ("event_words", "event_words"), ("best_count", "best_count")):
+            if old in saved:
+                r[new] = saved[old]
+        if saved.get("keywords_a") or saved.get("keywords_b"):
+            saved["keywords_backup_v2"] = {"A": saved.get("keywords_a", []), "B": saved.get("keywords_b", [])}
+        saved["rules"] = r
+    for key in ("keywords_a", "keywords_b", "exclude_words", "event_words", "best_count", "b_max_per_keyword",
+                "keywords_collapsed"):
+        saved.pop(key, None)
+    if saved:
+        saved["keywords_version"] = DEFAULT_CONFIG["keywords_version"]
     if saved and saved.get("feeds_version", 1) < 2:
         # v0.9.2: 전기신문을 기본 전문지에서 뺌 — 저장된 목록에서도 뺀다(직접 추가한 매체는 그대로)
         saved["extra_feeds"] = [f for f in saved.get("extra_feeds", []) if "electimes.com" not in f.get("url", "")]
         saved["feeds_version"] = DEFAULT_CONFIG["feeds_version"]
     cfg.update(saved)
+    cfg["rules"] = rules.normalize(cfg.get("rules"))
     cfg["keywords"] = all_keywords(cfg)
     return cfg
 
 
 def all_keywords(cfg: dict) -> list[str]:
-    """A 다음 B 순서로 합친 키워드 (중복 제거)."""
-    return list(dict.fromkeys(cfg.get("keywords_a", []) + cfg.get("keywords_b", [])))
+    """검색 키워드 전체: A(지사명 포함) → S → B 순서."""
+    return list(rules.search_grades(cfg["rules"]))
 
 
 def save(cfg: dict) -> None:

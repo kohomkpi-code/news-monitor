@@ -7,6 +7,11 @@
    - 제목은 달라도 같은 행사·사건(예: '월평2동 온마을축제'를 세 매체가 각자 제목으로 보도):
      이틀 안에 나온 기사끼리, 흔하지 않은 낱말(지명·행사명 등)을 2개 이상 같이 쓰면 같은 사안으로 본다.
      흔한 낱말(검색 키워드, 그날 기사 다수에 나오는 말, '개최'·'지원' 같은 말)은 세지 않는다.
+   - (v1.0) 하루(24시간) 안에 나온 기사끼리 낱말을 3개 이상 같이 쓰고 그중 하나라도 흔하지 않은 말이면
+     같은 사안(예: 'LH 신길4·녹번·송중 도심복합 5032가구'를 여러 매체가 제각각 쓴 경우).
+   - 한 낱말이 다른 낱말 안에 들어 있으면 같은 말로 본다('신길' = '신길4구역', '공공복합사업' = '도심공공복합사업').
+   - 묶인 기사의 낱말은 묶음에 보태서, 다음 기사는 묶음 전체와 비교한다(매체마다 제목을 달리 뽑아서).
+   - 세 자리 넘는 숫자 낱말('5032가구', '168억')도 센다.
 4) 제외어가 제목에 들어 있으면 뺀다 / 행사성 단어가 들어 있으면 뺀다
 """
 
@@ -24,6 +29,8 @@ _COMMON = set("""
 """.split())
 SAME_STORY_DAYS = 2      # 이 기간 안에 나온 기사끼리만 같은 사안으로 묶는다
 SAME_STORY_SHARED = 2    # 흔하지 않은 낱말을 이만큼 같이 쓰면 같은 사안
+SAME_DAY_HOURS = 24      # 이 시간 안에 나온 기사끼리는
+SAME_DAY_SHARED = 3      # 낱말(흔한 말 포함)을 이만큼 같이 쓰면 같은 사안(흔하지 않은 말이 하나는 있어야)
 
 
 def normalize(title: str) -> str:
@@ -40,7 +47,16 @@ def words(text: str) -> set[str]:
             if len(w) > len(j) + 1 and w.endswith(j):
                 w = w[: -len(j)]
                 break
-        if len(w) >= 2 and not w[0].isdigit():
+        if len(w) >= 2 and (not w[0].isdigit() or re.match(r"\d{3,}", w)):
+            out.add(w)
+    return out
+
+
+def shared(mine: set[str], other: set[str]) -> set[str]:
+    """두 제목이 같이 쓰는 낱말. 한쪽이 다른 쪽 안에 들어 있으면 같은 말('신길' ~ '신길4구역')."""
+    out = set()
+    for w in mine:
+        if w in other or any(len(o) >= 2 and (o in w or w in o) for o in other):
             out.add(w)
     return out
 
@@ -80,11 +96,13 @@ def dedupe(
     by_title: dict[str, Article] = {}
     kept: list[Article] = []
     kept_words: dict[int, set[str]] = {}
+    kept_all: dict[int, set[str]] = {}
 
     for art in ordered:
         key_link = art.link or art.naver_link
         key_title = normalize(art.title)
-        my_words = words(art.title) - common
+        all_words = words(art.title)
+        my_words = all_words - common
 
         dup = by_link.get(key_link) or by_title.get(key_title)
         if dup is None and merge_similar and key_title:
@@ -94,10 +112,15 @@ def dedupe(
                     if SequenceMatcher(None, key_title, ot).ratio() >= threshold:
                         dup = other
                         break
-                if (abs((art.published - other.published).days) <= SAME_STORY_DAYS
-                        and len(my_words & kept_words[id(other)]) >= SAME_STORY_SHARED):
+                gap = abs(art.published - other.published)
+                if gap.days <= SAME_STORY_DAYS and len(shared(my_words, kept_words[id(other)])) >= SAME_STORY_SHARED:
                     dup = other
                     break
+                if gap.total_seconds() <= SAME_DAY_HOURS * 3600:
+                    both = shared(all_words, kept_all[id(other)])
+                    if len(both) >= SAME_DAY_SHARED and both & my_words:
+                        dup = other
+                        break
 
         if dup is not None:
             for k in art.keywords:
@@ -108,12 +131,16 @@ def dedupe(
             if key_link != (dup.link or dup.naver_link):
                 dup.others.append((art.source, art.title, key_link))
             dup.others.extend(art.others)
+            if id(dup) in kept_words:  # 묶음의 낱말을 늘려 둔다
+                kept_words[id(dup)] |= my_words
+                kept_all[id(dup)] |= all_words
             continue
 
         by_link[key_link] = art
         by_title[key_title] = art
         kept.append(art)
         kept_words[id(art)] = my_words
+        kept_all[id(art)] = all_words
 
     # 결과는 최신순으로
     kept.sort(key=lambda a: a.published, reverse=True)

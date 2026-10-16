@@ -9,6 +9,7 @@
 import datetime as dt
 import re
 
+import rules as R
 from naver_api import Article
 
 SUMMARY_LEN = 80
@@ -60,3 +61,25 @@ def parse_selection(text: str, max_no: int) -> tuple[list[tuple[int, str, str]],
         seen.add(no)
         picked.append((no, parts[1], parts[2] if len(parts) > 2 else ""))
     return picked, ignored
+
+
+def build_rules_request(rules_now: dict, version: str) -> str:
+    """[선정 규칙] 탭 '개선 요청문': 결과 엑셀과 함께 Claude 에 보내면, 고친 규칙(JSON)을 돌려받는다."""
+    return "\n".join([
+        f"[KOHOM 뉴스룸 v{version} 선정 규칙 개선 요청]",
+        "첨부한 엑셀은 이 앱의 조회 결과입니다(시트: 조회결과·빠진 기사·조회 조건·선정 규칙).",
+        "'프로 선택'·'베이직 선택' 열이 담당자의 최종 판단이고, '★추천'·'점수'·'자동 분류'·'점수 근거'가 앱의 판단입니다.",
+        "",
+        "1. 앱 판단과 담당자 판단이 어긋난 기사를 찾아, 원인을 규칙 항목(키워드·단어 목록·점수·추천 기준)으로 설명해 주세요.",
+        "2. '빠진 기사' 시트에서 빠지면 안 되었던 기사, 표에 남았지만 빠졌어야 할 기사(해외·무관 매체 등)를 알려 주세요.",
+        "3. 고칠 점을 표로 요약하고, 마지막에 고친 규칙 전체를 JSON 코드 블록 하나로 주세요.",
+        "   - 아래 '지금 규칙'과 같은 형식, 같은 키 이름. 바꾼 값만이 아니라 전체를 주세요.",
+        "   - 키워드 맞추기: 띄어 쓴 말은 모두 들어 있으면 맞음(순서·띄어쓰기 무관), \"따옴표\"는 그대로, A OR B, -빼는말.",
+        "   - '공공기관'·'국정감사' 같은 범용어 하나는 수백 건을 끌어오므로 피하고, 필요하면 '공공기관 경영평가'처럼 묶어 주세요.",
+        "   - 검색 키워드가 늘면 조회가 느려지므로, 늘린 만큼 효과 없는 키워드는 빼 주세요.",
+        "",
+        "지금 규칙:",
+        "```json",
+        R.to_json(rules_now),
+        "```",
+    ])

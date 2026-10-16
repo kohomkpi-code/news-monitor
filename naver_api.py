@@ -37,17 +37,25 @@ class Article:
     published: dt.datetime
     description: str
     keywords: list = field(default_factory=list)  # 이 기사를 찾아낸 키워드들
-    grade: str = ""      # 키워드 등급: "A"(기관 직접) / "B"(정책·환경) / "직접"(사람이 링크로 추가)
+    grade: str = ""      # 키워드 등급: "A"(기관 직접) / "S"(사업어) / "B"(환경) / "직접"(사람이 링크로 추가)
     category: str = ""   # AI 선정 분류 (예: 리스크, 기관 직접)
     insight: str = ""    # AI 선정 한 줄 인사이트
     others: list = field(default_factory=list)  # 같은 사안으로 묶인 다른 기사 [(매체, 제목, 링크)]
     score: int = 0       # 추천 점수 (ranking.py)
     best: bool = False   # 추천 5건에 뽑혔는지
+    auto_category: str = ""  # 규칙으로 추정한 분류 (AI 분류 category 가 없으면 이것을 보여 준다)
+    parts: dict = field(default_factory=dict)  # 점수 항목별 점수 (ranking.evaluate)
+    hits: dict = field(default_factory=dict)   # 점수에 쓰인 걸린 말 (S 사업어·리스크어 …)
 
     @property
     def source_label(self) -> str:
         """'충남일보 외 2' 처럼 묶인 기사 수를 붙인 매체명."""
         return f"{self.source} 외 {len(self.others)}" if self.others else self.source
+
+    @property
+    def shown_category(self) -> str:
+        """표에 보일 분류: AI 가 정한 것이 있으면 그것, 없으면 규칙 추정."""
+        return self.category or self.auto_category
 
     @property
     def all_links(self) -> list[str]:

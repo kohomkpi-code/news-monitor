@@ -17,6 +17,7 @@
 
 import dataclasses
 import datetime as dt
+import json
 import os
 import threading
 import tkinter as tk
@@ -44,6 +45,7 @@ import mail_import
 import naver_api
 import ranking
 import report
+import rules
 import selection
 import theme
 import updater
@@ -55,8 +57,8 @@ from version import APP_TITLE, __version__
 
 KST = calendar_kr.KST
 SOURCE_LABELS = {"google": "구글 뉴스", "naver": "네이버"}
-TABS = ["basic", "pro", "history", "settings"]
-TAB_NAMES = {"basic": "베이직", "pro": "프로", "history": "보고 기록", "settings": "설정"}
+TABS = ["basic", "pro", "history", "rules", "settings"]
+TAB_NAMES = {"basic": "베이직", "pro": "프로", "history": "보고 기록", "rules": "선정 규칙", "settings": "설정"}
 STEPS = [("조회", "기간 확인 후 조회"), ("추천 확인", "★추천 확인 · 선택 0건"),
          ("보고서 열기", "제목·본문 복사 → 메일 붙여넣기"), ("보고 완료로 기록", "보낸 기사는 다음 조회에서 빠짐")]
 PERIOD_BUTTONS = {"자동": "auto", "오늘": 0, "최근 3일": 2, "최근 7일": 6}
@@ -131,10 +133,11 @@ class App(tk.Tk):
         self._build_basic(self.pages["basic"])
         self._build_pro(self.pages["pro"])
         self._build_history(self.pages["history"])
+        self._build_rules(self.pages["rules"])
         self._build_settings(self.pages["settings"])
 
     def _build_header(self):
-        """네이비 머리띠: 앱 이름 + 버전, 탭 4개(선택 탭 아래 흰 막대), 업데이트 확인."""
+        """네이비 머리띠: 앱 이름 + 버전, 탭 5개(선택 탭 아래 흰 막대), 업데이트 확인."""
         bar = tk.Frame(self, bg=NAVY, height=48)
         bar.pack(fill="x", side="top")
         bar.pack_propagate(False)
@@ -190,6 +193,11 @@ class App(tk.Tk):
                                  word="보고 기록", kind="info")
             elif name == "settings":
                 self._set_status("바꾼 값은 [설정 저장]을 눌러야 적용됩니다.", word="설정", kind="info")
+            elif name == "rules":
+                n = len(self.cfg.get("rules_log", []))
+                self._set_status("고친 규칙은 [규칙 저장]을 눌러야 다음 조회부터 적용됩니다."
+                                 + (f" 지금까지 {n}번 바꿨습니다." if n else " 지금은 기본 규칙입니다."),
+                                 word="선정 규칙", kind="info")
 
     def _build_statusbar(self):
         """네이비 상태 띠: 점 · 상태어 · (진행 막대) · 문장. 오류면 띠 전체가 빨강."""
@@ -394,38 +402,25 @@ class App(tk.Tk):
         self.merge_similar_var = tk.BooleanVar()
         self.exclude_events_var = tk.BooleanVar()
         for text, var in (("이미 보고한 기사 제외", self.exclude_sent_var), ("같은 사안 기사 묶기", self.merge_similar_var),
-                          ("단순 행사 기사 제외 (단어는 [설정])", self.exclude_events_var)):
+                          ("단순 행사 기사 제외 (A는 감점)", self.exclude_events_var)):
             ttk.Checkbutton(head, text=text, variable=var).pack(side="left", padx=(0, 18))
-        self.fold_btn = ttk.Button(head, text="키워드 접기 ▲", style="Link.TButton", command=self._toggle_keywords)
-        self.fold_btn.pack(side="right")
         hline(cond).pack(fill="x")
         body = tk.Frame(cond, bg=PANEL)
         body.pack(fill="x", padx=16, pady=(10, 12))
         row = tk.Frame(body, bg=PANEL)
         row.pack(fill="x")
         self._period_row(row, ["자동", "오늘", "최근 3일", "최근 7일"])
-        self.kw_summary = ttk.Label(row, text="", style="PanelDesc.TLabel")
         self.search_btn = ttk.Button(row, text="조회", width=10, style="Secondary.TButton",
                                      command=lambda: self._search("pro"))
         self.search_btn.pack(side="right")
-        self.kw_area = tk.Frame(body, bg=PANEL)
-        self.kw_area.pack(fill="x", pady=(12, 0))
-        boxes = []
-        for i, (title, desc) in enumerate((("A 기관 직접", "무조건 포함 · 한 줄에 하나"),
-                                           ("B 정책·환경", "위가 우선 · 한 줄에 하나"),
-                                           ("제외어", "제목에 있으면 제외 (A는 예외)"))):
-            self.kw_area.grid_columnconfigure(i, weight=1, uniform="kw")
-            col = tk.Frame(self.kw_area, bg=PANEL)
-            col.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 6, 0 if i == 2 else 6))
-            lab = tk.Frame(col, bg=PANEL)
-            lab.pack(fill="x", pady=(0, 6))
-            ttk.Label(lab, text=title, style="PanelTitle.TLabel").pack(side="left")
-            ttk.Label(lab, text=desc, style="PanelDesc.TLabel").pack(side="left", padx=(8, 0))
-            wrap, text = theme.text_box(col, self.F, height=4)
-            wrap.pack(fill="both", expand=True)
-            text.bind("<KeyRelease>", lambda e: self._update_kw_summary())
-            boxes.append(text)
-        self.kw_a_text, self.kw_b_text, self.ex_text = boxes
+        # 키워드·제외어·점수는 [선정 규칙] 탭 한곳에서 고친다(여기는 요약만)
+        kw = tk.Frame(body, bg=PANEL)
+        kw.pack(fill="x", pady=(10, 0))
+        ttk.Label(kw, text="키워드", style="PanelTitle.TLabel").pack(side="left", padx=(0, 12))
+        self.kw_summary = ttk.Label(kw, text="", style="PanelDesc.TLabel")
+        self.kw_summary.pack(side="left")
+        ttk.Button(kw, text="선정 규칙에서 고치기 ›", style="Link.TButton",
+                   command=lambda: self._select_tab("rules")).pack(side="right")
 
         res = panel(page)
         res.grid(row=1, column=0, sticky="nsew", pady=12)
@@ -462,27 +457,12 @@ class App(tk.Tk):
         ttk.Button(foot, text="⤓ 결과 엑셀로 내려받기", style="Small.TButton", command=self._export_results).pack(side="left")
         tk.Label(foot, text="· 표 머리글을 누르면 정렬", bg=BG, fg=DESC, font=self.F.desc).pack(side="left", padx=(6, 0))
 
-    def _toggle_keywords(self, collapsed: bool | None = None):
-        if collapsed is None:
-            collapsed = self.kw_area.winfo_ismapped()
-        if collapsed:
-            self.kw_area.pack_forget()
-            self.kw_summary.pack(side="left", padx=(16, 0))
-            self.fold_btn.configure(text="키워드 펼치기 ▼")
-        else:
-            self.kw_summary.pack_forget()
-            self.kw_area.pack(fill="x", pady=(12, 0))
-            self.fold_btn.configure(text="키워드 접기 ▲")
-        self._update_kw_summary()
-        self.cfg["keywords_collapsed"] = collapsed
-        try:
-            config.save(self.cfg)
-        except OSError:
-            pass
-
     def _update_kw_summary(self):
-        self.kw_summary.configure(text=f"A {len(self._lines(self.kw_a_text))}개 · B {len(self._lines(self.kw_b_text))}개"
-                                       f" · 제외어 {len(self._lines(self.ex_text))}개")
+        r = self.cfg["rules"]
+        self.kw_summary.configure(
+            text=f"A 기관 {len(rules.a_keywords(r))} · S 사업어 {len(rules.s_keywords(r))} · B 환경 {len(r['kw_b'])}"
+                 f" · 제외어 {len(r['exclude_words'])} · 제외 매체 {len(r['exclude_media'])}"
+                 f" · 추천 {r['best_count']}건({r['min_score']}점 이상)")
 
     # ================================================================== 보고 기록
     def _build_history(self, page):
@@ -706,27 +686,20 @@ class App(tk.Tk):
                 v.trace_add("write", lambda *a: self._update_subject_preview())
         hline(left).pack(fill="x")
 
-        box, _ = section("추천", "베이직 탭에서 미리 고를 건수와 B 키워드 하나당 받을 최대 건수입니다.")
-        r = tk.Frame(box, bg=PANEL)
-        r.pack(anchor="w")
-        for i, (label, key) in enumerate((("추천 건수 (베이직)", "best_count"), ("B 키워드당 최대", "b_max_per_keyword"))):
-            ttk.Label(r, text=label, style="Panel.TLabel").pack(side="left", padx=(0 if i == 0 else 28, 8))
-            v = tk.StringVar()
-            self.setting_vars[key] = v
-            ttk.Entry(r, textvariable=v, width=6).pack(side="left")
-            ttk.Label(r, text="건", style="PanelDesc.TLabel").pack(side="left", padx=(6, 0))
+        box, _ = section("선정 규칙", "키워드·제외어·행사 단어·점수·추천 기준은 [선정 규칙] 탭에서 보고 고칩니다.\n"
+                                   "앱을 업데이트하지 않아도 다음 조회부터 바로 적용됩니다.")
+        ttk.Button(box, text="선정 규칙 열기 ›", style="Link.TButton",
+                   command=lambda: self._select_tab("rules")).pack(anchor="w")
 
         right = tk.Frame(page, bg=BG)
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
         right.grid_rowconfigure(0, weight=1)
-        right.grid_rowconfigure(1, weight=1)
         self.list_counts = {}
         for i, (key, title, desc) in enumerate((
-                ("event", "단순 행사 단어", "제목에 있으면 A 등급이라도 제외합니다 · 한 줄에 하나"),
-                ("holiday", "공휴일", "자동 기간 계산용 · 임시공휴일은 'YYYY-MM-DD 이름'으로 한 줄 추가"))):
+                ("holiday", "공휴일", "자동 기간 계산용 · 임시공휴일은 'YYYY-MM-DD 이름'으로 한 줄 추가"),)):
             p = panel(right)
-            p.grid(row=i, column=0, sticky="nsew", pady=(0, 12) if i == 0 else 0)
+            p.grid(row=i, column=0, sticky="nsew")
             h = tk.Frame(p, bg=PANEL)
             h.pack(fill="x", padx=20, pady=(14, 2))
             ttk.Label(h, text=title, style="PanelTitle.TLabel").pack(side="left")
@@ -737,15 +710,283 @@ class App(tk.Tk):
             wrap, text = theme.text_box(p, self.F, height=6)
             wrap.pack(fill="both", expand=True, padx=20, pady=(0, 16))
             text.bind("<KeyRelease>", lambda e: self._update_list_counts())
-            if key == "event":
-                self.event_text = text
-            else:
-                self.holiday_text = text
+            self.holiday_text = text
 
         foot = tk.Frame(page, bg=BG)
         foot.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         tk.Label(foot, text="모든 값은 이 PC의 config.json에만 저장됩니다.", bg=BG, fg=DESC, font=self.F.desc).pack(side="left")
         ttk.Button(foot, text="설정 저장", width=14, style="PrimaryBig.TButton", command=self._save_settings).pack(side="right")
+
+    # ================================================================== 선정 규칙
+    def _build_rules(self, page):
+        """선정 규칙: 키워드·거르기·점수·분류·추천을 보고 고친다. 환류(Claude 개선안 붙여넣기)·변경 이력."""
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(1, weight=1)
+        self.rule_lists: dict[str, tk.Text] = {}
+        self.rule_counts: dict[str, ttk.Label] = {}
+        self.rule_nums: dict[str, tk.StringVar] = {}
+        self.rule_flags: dict[str, tk.BooleanVar] = {}
+        self.rule_texts: dict[str, tk.StringVar] = {}
+
+        note = tk.Frame(page, bg=NOTE_BG, highlightthickness=1, highlightbackground=NOTE_BORDER)
+        note.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        ttk.Label(note, text="환류: 프로 탭 [결과 엑셀로 내려받기] → [개선 요청문 복사] → Claude 에 엑셀과 함께 보내기 "
+                             "→ 답변을 [Claude 답변 붙여넣기] → 바뀐 점 확인 후 적용",
+                  style="Note.TLabel", wraplength=560, justify="left").pack(side="left", padx=16, pady=10)
+        ttk.Button(note, text="Claude 답변 붙여넣기", style="Small.TButton",
+                   command=self._paste_rules).pack(side="right", padx=(6, 12), pady=6)
+        ttk.Button(note, text="개선 요청문 복사", style="Small.TButton",
+                   command=self._copy_rules_request).pack(side="right", pady=6)
+
+        scroll = theme.ScrollPanel(page)
+        scroll.grid(row=1, column=0, sticky="nsew")
+        inner = scroll.inner
+
+        def section(title: str, desc: str) -> tk.Frame:
+            box = tk.Frame(inner, bg=PANEL)
+            box.pack(fill="x", padx=20, pady=(12, 10))
+            ttk.Label(box, text=title, style="PanelTitle.TLabel").pack(anchor="w")
+            ttk.Label(box, text=desc, style="PanelDesc.TLabel", wraplength=860, justify="left").pack(anchor="w", pady=(1, 8))
+            body = tk.Frame(box, bg=PANEL)
+            body.pack(fill="x")
+            return body
+
+        def lists(body: tk.Frame, keys: list[str], height: int = 6):
+            grid = tk.Frame(body, bg=PANEL)
+            grid.pack(fill="x", pady=(0, 10))
+            for i, key in enumerate(keys):
+                grid.grid_columnconfigure(i, weight=1, uniform="rl")
+                name, desc = rules.LIST_FIELDS[key]
+                col = tk.Frame(grid, bg=PANEL)
+                col.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 6, 0 if i == len(keys) - 1 else 6))
+                head = tk.Frame(col, bg=PANEL)
+                head.pack(fill="x")
+                ttk.Label(head, text=name, style="Panel.TLabel").pack(side="left")
+                cnt = ttk.Label(head, text="", style="PanelFaint.TLabel")
+                cnt.pack(side="right")
+                ttk.Label(col, text=desc, style="PanelDesc.TLabel").pack(anchor="w", pady=(0, 4))
+                wrap, text = theme.text_box(col, self.F, height=height)
+                wrap.pack(fill="both", expand=True)
+                text.bind("<KeyRelease>", lambda e: self._update_rule_counts())
+                self.rule_lists[key] = text
+                self.rule_counts[key] = cnt
+
+        def numbers(body: tk.Frame, keys: list[str], per_row: int = 4):
+            grid = tk.Frame(body, bg=PANEL)
+            grid.pack(fill="x", pady=(0, 10))
+            for i, key in enumerate(keys):
+                name, unit = rules.NUMBER_FIELDS[key]
+                cell = tk.Frame(grid, bg=PANEL)
+                cell.grid(row=i // per_row, column=i % per_row, sticky="w", padx=(0, 22), pady=3)
+                ttk.Label(cell, text=name, style="Panel.TLabel").pack(side="left", padx=(0, 6))
+                v = tk.StringVar()
+                ttk.Entry(cell, textvariable=v, width=5, justify="right").pack(side="left")
+                ttk.Label(cell, text=unit, style="PanelDesc.TLabel").pack(side="left", padx=(4, 0))
+                self.rule_nums[key] = v
+
+        body = section("① 검색 키워드", "이 말들로 기사를 찾고, 제목에 실제로 들어 있는지 다시 확인합니다(구글은 검색어가 없는 "
+                                      "기사도 주기 때문). 띄어 쓴 말은 모두 들어 있으면 맞음 · \"따옴표\"는 그대로 · "
+                                      "A OR B · -빼는말. 한 줄에 하나.")
+        lists(body, ["kw_a", "kw_s", "kw_b"], height=9)
+        lists(body, ["kw_a_branch", "complex_names", "exclude_words"], height=5)
+        row = tk.Frame(body, bg=PANEL)
+        row.pack(fill="x")
+        ttk.Label(row, text=rules.TEXT_FIELDS["kw_a_branch_with"][0], style="Panel.TLabel").pack(side="left", padx=(0, 6))
+        v = tk.StringVar()
+        ttk.Entry(row, textvariable=v, width=8).pack(side="left", padx=(0, 22))
+        self.rule_texts["kw_a_branch_with"] = v
+        for key, text in rules.FLAG_FIELDS.items():
+            fv = tk.BooleanVar()
+            ttk.Checkbutton(row, text=text, variable=fv).pack(side="left", padx=(0, 18))
+            self.rule_flags[key] = fv
+        numbers(body, ["max_per_keyword"])
+        hline(inner).pack(fill="x")
+
+        body = section("② 거르기", "제외 매체는 매체명·주소에 들어 있으면 뺍니다. 단순 행사어가 있으면 A 기사는 감점, "
+                                  "나머지는 뺍니다(프로 탭 '단순 행사 기사 제외'가 켜져 있을 때).")
+        lists(body, ["event_words", "exclude_media"], height=5)
+        hline(inner).pack(fill="x")
+
+        body = section("③ 점수", "제목 기준. 리스크어는 A·S·모회사어가 같은 제목에 있을 때만, 정책어는 S·모회사어·정책 "
+                                "조건어가 있을 때만 점수를 줍니다. 공급·개발어는 S가 없을 때 감점. 감점은 음수로 적습니다.")
+        numbers(body, ["w_a", "w_s", "w_s2", "w_parent", "w_b", "w_risk", "w_policy", "w_multi_each", "w_multi_max",
+                       "w_specialist", "w_local", "w_recent", "w_exclusive", "w_dev", "w_event_a"])
+        lists(body, ["parent_words", "risk_words", "policy_words"], height=6)
+        lists(body, ["policy_context", "dev_words", "specialist_press", "local_press"], height=5)
+        hline(inner).pack(fill="x")
+
+        body = section("④ 분류", "위에서부터 처음 맞는 것: 리스크(A·S·모회사어 + 리스크어) → 기관 직접(A) → 모회사·부처"
+                                "(모회사어, S 없이) → 정책·제도(정책어 점수·정책·제도어·S) → 공공기관 공통 → 업계·환경. "
+                                "프로 탭에서 AI 선정 결과를 붙여 넣으면 AI 분류가 우선입니다.")
+        lists(body, ["cat_policy_words", "cat_public_words"], height=4)
+        hline(inner).pack(fill="x")
+
+        body = section("⑤ 추천 (베이직 ★)", "리스크 먼저(최대 N건) → 공단(A) 최소 N건 → 점수순. 같은 분류는 N건까지, "
+                                          "최소 점수 미만은 추천하지 않습니다(그날은 추천이 적게 나옴). 직접 추가한 기사는 항상 포함.")
+        numbers(body, ["best_count", "min_score", "risk_first_max", "a_min", "per_category_max"])
+        hline(inner).pack(fill="x")
+
+        body = section("변경 이력", "규칙을 저장할 때마다 무엇이 바뀌었는지 남깁니다(최근 10개).")
+        self.rules_log_label = ttk.Label(body, text="", style="Panel.TLabel", wraplength=860, justify="left")
+        self.rules_log_label.pack(anchor="w")
+
+        foot = tk.Frame(page, bg=BG)
+        foot.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        for text, cmd in (("규칙 파일 불러오기", self._import_rules_file), ("규칙 파일 내보내기", self._export_rules_file),
+                          ("기본값으로", self._reset_rules)):
+            ttk.Button(foot, text=text, style="Small.TButton", command=cmd).pack(side="left", padx=(0, 8))
+        ttk.Button(foot, text="규칙 저장", width=14, style="PrimaryBig.TButton",
+                   command=lambda: self._save_rules("직접 수정")).pack(side="right")
+
+    def _load_rules_into_ui(self, r: dict | None = None):
+        r = r or self.cfg["rules"]
+        for key, text in self.rule_lists.items():
+            text.delete("1.0", "end")
+            text.insert("1.0", "\n".join(r[key]))
+        for key, v in self.rule_nums.items():
+            v.set(str(r[key]))
+        for key, v in self.rule_flags.items():
+            v.set(bool(r[key]))
+        for key, v in self.rule_texts.items():
+            v.set(r[key])
+        self._update_rule_counts()
+        self._update_rules_log()
+        self._update_kw_summary()
+
+    def _update_rule_counts(self):
+        for key, text in self.rule_lists.items():
+            self.rule_counts[key].configure(text=f"{len(self._lines(text))}개")
+
+    def _update_rules_log(self):
+        log = self.cfg.get("rules_log", [])[-10:][::-1]
+        lines = [f"{e['at']} · {e['how']} · " + " / ".join(e["changes"][:6])
+                 + (f" 외 {len(e['changes']) - 6}건" if len(e["changes"]) > 6 else "") for e in log]
+        self.rules_log_label.configure(text="\n".join(lines) or "아직 바꾼 적이 없습니다(기본 규칙 사용 중).")
+
+    def _rules_from_ui(self) -> dict:
+        """화면의 규칙. 숫자가 아닌 칸이 있으면 ValueError(칸 이름)."""
+        r = dict(self.cfg["rules"])
+        for key, text in self.rule_lists.items():
+            r[key] = self._lines(text)
+        for key, v in self.rule_nums.items():
+            try:
+                r[key] = int(v.get().strip())
+            except ValueError:
+                raise ValueError(rules.label(key)) from None
+        for key, v in self.rule_flags.items():
+            r[key] = v.get()
+        for key, v in self.rule_texts.items():
+            r[key] = v.get().strip()
+        return rules.normalize(r)
+
+    def _save_rules(self, how: str, new: dict | None = None):
+        if new is None:
+            try:
+                new = self._rules_from_ui()
+            except ValueError as e:
+                messagebox.showwarning("규칙 저장", f"'{e}' 칸에는 숫자만 적어 주세요.")
+                return
+        changes = rules.diff(self.cfg["rules"], new)
+        if not changes:
+            self._load_rules_into_ui()
+            self._set_status("바뀐 규칙이 없습니다.", word="선정 규칙", kind="info")
+            return
+        old = self.cfg["rules"]
+        refetch = any(new[k] != old[k] for k in ("kw_a", "kw_a_branch", "kw_a_branch_with", "kw_s", "complex_names",
+                                                 "kw_b", "exclude_words", "event_words", "exclude_media",
+                                                 "exact_search", "check_summary", "max_per_keyword"))
+        self.cfg["rules"] = new
+        self.cfg["keywords"] = config.all_keywords(self.cfg)
+        self.cfg["rules_log"] = (self.cfg.get("rules_log", []) + [rules.log_entry(changes, how, dt.datetime.now(KST))])[-100:]
+        config.save(self.cfg)
+        self._load_rules_into_ui()
+        msg = f"규칙을 저장했습니다({how} · 바뀐 항목 {len(changes)}개)."
+        if self.arts:
+            self._rescore()
+            for t in (self.basic, self.pro):
+                t.refresh()
+            msg += " 지금 결과의 점수·분류·★추천을 다시 계산했습니다."
+            if refetch:
+                msg += " 키워드·거르기 규칙이 바뀌었으니 다시 조회해야 반영됩니다."
+        self._set_status(msg, word="선정 규칙")
+
+    def _preview_rules(self, new: dict, how: str):
+        """바뀔 점을 보여 주고 [적용]을 누르면 저장한다."""
+        try:
+            current = self._rules_from_ui()
+        except ValueError:
+            current = self.cfg["rules"]
+        changes = rules.diff(current, new)
+        if not changes:
+            messagebox.showinfo("선정 규칙", "지금 규칙과 같습니다. 바뀔 것이 없습니다.")
+            return
+
+        def apply():
+            win.destroy()
+            self._save_rules(how, new)
+
+        win, body, _ = self._dialog("바뀔 규칙 확인", f"{how} — 아래 {len(changes)}개 항목이 바뀝니다. "
+                                                   "[적용]을 누르면 저장하고 변경 이력에 남깁니다.", "적용", apply)
+        wrap, box = theme.text_box(body, self.F, height=14, width=84)
+        wrap.pack(fill="both", expand=True)
+        box.configure(wrap="word")
+        box.insert("1.0", "\n".join(f"• {c}" for c in changes))
+        box.configure(state="disabled")
+
+    def _paste_rules(self):
+        def go():
+            try:
+                new = rules.normalize(rules.from_text(box.get("1.0", "end")))
+            except ValueError as e:
+                info.configure(text=f"{e} Claude 답변의 JSON 부분({{ 로 시작)을 포함해 붙여 넣으세요.")
+                return
+            win.destroy()
+            self._preview_rules(new, "Claude 개선안 적용")
+
+        win, body, _ = self._dialog(
+            "Claude 답변 붙여넣기",
+            "Claude 가 돌려준 규칙(JSON)을 붙여 넣으세요. 답변 전체를 붙여 넣어도 됩니다.\n"
+            "[다음]을 누르면 바뀔 항목을 먼저 보여 줍니다. 빠진 항목은 기본값으로 채웁니다.", "다음", go)
+        wrap, box = theme.text_box(body, self.F, height=14, width=84)
+        wrap.pack(fill="both", expand=True)
+        box.focus_set()
+        row, info = self._info_line(body)
+        row.pack(anchor="w", pady=(10, 0))
+        info.configure(text="예) {\"format\": \"kohom-newsroom-rules\", \"rules\": {\"kw_s\": [...], \"w_s\": 30, ...}}")
+
+    def _copy_rules_request(self):
+        text = selection.build_rules_request(self.cfg["rules"], __version__)
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()
+        self._set_status("개선 요청문을 복사했습니다 → Claude 대화창에 붙여 넣고 결과 엑셀 파일을 첨부하세요.", word="선정 규칙")
+
+    def _export_rules_file(self):
+        path = filedialog.asksaveasfilename(
+            parent=self, title="규칙 파일 내보내기", defaultextension=".json",
+            initialfile=f"KOHOM뉴스룸_선정규칙_{dt.datetime.now(KST):%Y%m%d}.json", filetypes=[("규칙 파일", "*.json")])
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(rules.to_json(self.cfg["rules"]))
+        self._set_status(f"저장된 규칙을 파일로 내보냈습니다: {os.path.basename(path)} (다른 PC에서 [규칙 파일 불러오기])",
+                         word="선정 규칙")
+
+    def _import_rules_file(self):
+        path = filedialog.askopenfilename(parent=self, title="규칙 파일 불러오기",
+                                          filetypes=[("규칙 파일", "*.json *.txt"), ("모든 파일", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                new = rules.normalize(rules.from_text(f.read()))
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            messagebox.showwarning("규칙 파일 불러오기", f"규칙을 읽지 못했습니다.\n{e}")
+            return
+        self._preview_rules(new, f"규칙 파일 불러옴({os.path.basename(path)})")
+
+    def _reset_rules(self):
+        self._preview_rules(rules.normalize(None), "기본값으로 되돌림")
 
     def _update_feeds_summary(self):
         fs = self.cfg.get("extra_feeds", [])
@@ -910,15 +1151,11 @@ class App(tk.Tk):
         self.subject_preview.configure(text=f"{{날짜}} → {today:%y%m%d} · 결과: {result}")
 
     def _update_list_counts(self):
-        self.list_counts["event"].configure(text=f"{len(self._lines(self.event_text))}개")
         self.list_counts["holiday"].configure(text=f"{len(self._lines(self.holiday_text))}개")
 
     # ================================================================== 설정 ↔ 화면
     def _load_config_into_ui(self):
         self._set_auto_period()
-        self.kw_a_text.insert("1.0", "\n".join(self.cfg.get("keywords_a", [])))
-        self.kw_b_text.insert("1.0", "\n".join(self.cfg.get("keywords_b", [])))
-        self.ex_text.insert("1.0", "\n".join(self.cfg.get("exclude_words", [])))
         self.exclude_sent_var.set(bool(self.cfg.get("exclude_sent", True)))
         self.merge_similar_var.set(bool(self.cfg.get("merge_similar", True)))
         self.exclude_events_var.set(bool(self.cfg.get("exclude_events", True)))
@@ -926,12 +1163,11 @@ class App(tk.Tk):
         self.feeds_var.set(bool(self.cfg.get("use_feeds", True)))
         for key, v in self.setting_vars.items():
             v.set(str(self.cfg.get(key, "")))
-        self.event_text.insert("1.0", "\n".join(self.cfg.get("event_words", [])))
         self.holiday_text.insert("1.0", "\n".join(self.cfg.get("holidays", [])))
         self._on_source_change()
         self._update_list_counts()
         self._update_feeds_summary()
-        self._toggle_keywords(bool(self.cfg.get("keywords_collapsed", False)))
+        self._load_rules_into_ui()
         self._update_steps()
         self._on_selection_change()
         tab = self.cfg.get("last_tab", "basic")
@@ -939,10 +1175,7 @@ class App(tk.Tk):
         self._set_status("[① 조회]를 누르면 시작합니다. 기간은 직전 영업일 09:00부터 자동입니다.", word="준비", kind="info")
 
     def _save_ui_into_config(self):
-        self.cfg["keywords_a"] = self._lines(self.kw_a_text)
-        self.cfg["keywords_b"] = self._lines(self.kw_b_text)
         self.cfg["keywords"] = config.all_keywords(self.cfg)
-        self.cfg["exclude_words"] = self._lines(self.ex_text)
         self.cfg["exclude_sent"] = self.exclude_sent_var.get()
         self.cfg["merge_similar"] = self.merge_similar_var.get()
         self.cfg["exclude_events"] = self.exclude_events_var.get()
@@ -953,13 +1186,6 @@ class App(tk.Tk):
         self.cfg["use_feeds"] = self.feeds_var.get()
         for key, v in self.setting_vars.items():
             self.cfg[key] = v.get().strip()
-        for key, default in (("best_count", 5), ("b_max_per_keyword", 50)):
-            try:
-                self.cfg[key] = max(0, int(self.cfg[key]))
-            except ValueError:
-                self.cfg[key] = default
-            self.setting_vars[key].set(str(self.cfg[key]))
-        self.cfg["event_words"] = self._lines(self.event_text)
         self.cfg["holidays"] = self._lines(self.holiday_text)
         config.save(self.cfg)
         self._set_auto_period()
@@ -1124,19 +1350,15 @@ class App(tk.Tk):
             return
 
         self._save_ui_into_config()
-        if not self.cfg["keywords"]:
-            messagebox.showwarning("키워드 확인", "[프로] 탭에서 검색 키워드를 한 개 이상 입력하세요.")
+        grades = rules.search_grades(self.cfg["rules"])  # 키워드 → 등급(A/S/B), 검색 순서
+        if not grades:
+            messagebox.showwarning("키워드 확인", "[선정 규칙] 탭에서 검색 키워드를 한 개 이상 입력하세요.")
             return
         if self._source() == "naver" and (not self.cfg.get("client_id") or not self.cfg.get("client_secret")):
             messagebox.showwarning("설정 필요", "네이버 Client ID / Secret 을 [설정] 탭에서 입력하세요.\n"
                                    "키가 없으면 '구글 뉴스 (키 불필요)'를 고르세요.")
             self._select_tab("settings")
             return
-
-        # 키워드 → 등급. A·B 양쪽에 같은 키워드가 있으면 A.
-        grades = {k: "A" for k in self.cfg["keywords_a"]}
-        for k in self.cfg["keywords_b"]:
-            grades.setdefault(k, "B")
 
         self.searching = True
         for b in (self.search_btn, self.basic_search_btn):
@@ -1148,10 +1370,11 @@ class App(tk.Tk):
     def _search_worker(self, grades: dict[str, str], start: dt.datetime, end: dt.date):
         source = self._source()
         label = SOURCE_LABELS[source]
+        r = self.cfg["rules"]
         found: list[Article] = []
         feed_failed: list[str] = []
         try:
-            b_max = int(self.cfg.get("b_max_per_keyword", 50) or 0)
+            per_kw = max(0, int(r["max_per_keyword"]))
             n = len(grades)
             for i, kw in enumerate(grades, 1):
                 msg = f"{label} 검색 중 · 키워드 {i}/{n} '{kw}' · 지금까지 {len(found)}건 수집"
@@ -1161,10 +1384,11 @@ class App(tk.Tk):
                     arts = naver_api.search_news(kw, self.cfg["client_id"], self.cfg["client_secret"],
                                                  start.date(), end)
                 else:
-                    # A 는 빠짐없이(기간 나눠 다시 묻기), B 는 한 번만
-                    arts = google_news.search_news(kw, start.date(), end, split=is_a)
-                if not is_a and b_max > 0:
-                    arts = arts[:b_max]
+                    # A 는 빠짐없이(기간 나눠 다시 묻기, 지사명 조합은 한 번), 나머지는 한 번만
+                    arts = google_news.search_news(kw, start.date(), end, split=kw in r["kw_a"],
+                                                   query=rules.google_query(kw, r["exact_search"]))
+                if not is_a and per_kw > 0:
+                    arts = arts[:per_kw]
                 for a in arts:
                     a.grade = grades[kw]
                 found.extend(arts)
@@ -1182,48 +1406,63 @@ class App(tk.Tk):
         # 시작 '시각'(예: 전 영업일 09:00) 이전 기사는 뺀다 — 검색은 날짜 단위라서
         found = [a for a in found if a.published >= start]
         raw_count = len(found)
-        # B 키워드로 찾았어도 제목·요약에 A 키워드(주택관리공단 등)가 있으면 A 로 올린다
-        a_keywords = [k for k, g in grades.items() if g == "A"]
-        for a in found:
-            if a.grade != "A" and any(feeds.keyword_matches(k, f"{a.title} {a.description}") for k in a_keywords):
-                a.grade = "A"
         # 빠진 기사와 이유 — [결과 내려받기] 파일의 '빠진 기사' 시트에 남긴다
         dropped: list[tuple[str, str, Article]] = []
 
-        def note_dropped(before: list[Article], after: list[Article], reason: str, words: list[str]):
-            kept = {id(a) for a in after}
-            words = [w.strip() for w in words if w.strip()]
-            dropped.extend((reason, ", ".join(ranking.hit_words(a.title, words)), a)
-                           for a in before if id(a) not in kept)
+        def keep(arts: list[Article], test, reason: str) -> list[Article]:
+            """test(기사) 가 빼는 이유(걸린 말)를 돌려주면 뺀다."""
+            out = []
+            for a in arts:
+                why = test(a)
+                if why is None:
+                    out.append(a)
+                else:
+                    dropped.append((reason, why, a))
+            return out
 
-        # 제외어는 B 에만 적용한다(A 는 '무조건 포함').
-        b_arts = [a for a in found if a.grade != "A"]
-        b_kept = dedup.apply_exclude(b_arts, self.cfg.get("exclude_words", []))
-        note_dropped(b_arts, b_kept, "제외어", self.cfg.get("exclude_words", []))
-        found = [a for a in found if a.grade == "A"] + b_kept
+        # ① 제외 매체(해외·무관 매체)
+        media = r["exclude_media"]
+        found = keep(found, lambda a: next((m for m in media if m.lower() in f"{a.source} {a.link}".lower()), None),
+                     "제외 매체")
+
+        # ② 제목 검증: 구글은 검색어가 제목에 없어도 관련 기사를 준다 → 걸린 키워드를 제목(요약)으로 다시 확인
+        def verify(a: Article):
+            kh = ranking.keyword_hits(a, r)
+            matched = kh["A"] + kh["S"] + kh["B"]
+            if not matched:
+                return ", ".join(a.keywords)  # 검색에 쓴 키워드
+            a.keywords = list(dict.fromkeys(matched))
+            a.grade = "A" if kh["A"] else "S" if kh["S"] else "B"
+            return None
+        found = keep(found, verify, "검증 실패(제목에 키워드 없음)")
+
+        # ③ 제외어는 B 에만(A·S 는 예외)
+        ex = r["exclude_words"]
+        found = keep(found, lambda a: ", ".join(rules.hits(ex, a.title)) or None if a.grade == "B" else None, "제외어")
+
+        # ④ 단순 행사: A 는 빼지 않고 감점(점수 규칙), 나머지는 뺀다
         events_skipped = 0
         if self.cfg.get("exclude_events", True):
-            # 단순 행사 기사는 A 등급이라도 뺀다
-            before = found
-            found = dedup.apply_exclude(found, self.cfg.get("event_words", []))
-            note_dropped(before, found, "단순 행사", self.cfg.get("event_words", []))
-            events_skipped = len(before) - len(found)
+            before = len(found)
+            ev = r["event_words"]
+            found = keep(found, lambda a: ", ".join(rules.hits(ev, a.title)) or None if a.grade != "A" else None,
+                         "단순 행사")
+            events_skipped = before - len(found)
         found = dedup.dedupe(found, self.cfg.get("merge_similar", True),
-                             float(self.cfg.get("similar_threshold", 0.85)), self.cfg.get("keywords", []))
+                             float(self.cfg.get("similar_threshold", 0.85)), list(grades))
         sent_skipped = 0
         if self.cfg.get("exclude_sent", True):
             sent = history.load()
-            before = found
             titles = history.sent_titles(sent, dedup.normalize)
-            found = [a for a in found if not history.is_sent(a.all_links, sent)
-                     and dedup.normalize(a.title) not in titles]
-            note_dropped(before, found, "이미 보고한 기사", [])
-            sent_skipped = len(before) - len(found)
+            before = len(found)
+            found = keep(found, lambda a: "" if (history.is_sent(a.all_links, sent)
+                                                 or dedup.normalize(a.title) in titles) else None, "이미 보고한 기사")
+            sent_skipped = before - len(found)
         # 조회한 그때의 조건(내려받기용). 비밀값(네이버 키)은 담지 않는다.
-        cond = {k: self.cfg.get(k) for k in ("keywords_a", "keywords_b", "exclude_words", "event_words",
-                                             "exclude_sent", "merge_similar", "exclude_events", "use_feeds",
-                                             "best_count", "b_max_per_keyword", "similar_threshold")}
+        cond = {k: self.cfg.get(k) for k in ("exclude_sent", "merge_similar", "exclude_events", "use_feeds",
+                                             "similar_threshold")}
         cond["feeds"] = [f.get("name", "") for f in self.cfg.get("extra_feeds", []) if f.get("on", True)]
+        cond["rules"] = json.loads(json.dumps(r))
         self.last_search = {"at": dt.datetime.now(KST), "start": start, "end": end, "source": label,
                             "raw_count": raw_count, "feed_failed": feed_failed, "dropped": dropped, "cfg": cond}
         self.after(0, self._search_done, found, raw_count, sent_skipped, feed_failed, events_skipped)
@@ -1240,17 +1479,12 @@ class App(tk.Tk):
         now = dt.datetime.now(KST)
         arts = list(self.arts.values())
         for a in arts:
-            a.score = sum(self._score_parts(a, now).values())
-        best = ranking.pick_best(arts, self._keyword_rank, int(self.cfg.get("best_count", 5) or 5))
+            ranking.evaluate(a, self.cfg["rules"], now)
+        best = ranking.pick_best(arts, self.cfg["rules"])
         best_ids = {id(a) for a in best}
         for a in arts:
             a.best = id(a) in best_ids
         return best
-
-    def _score_parts(self, a: Article, now: dt.datetime) -> dict[str, int]:
-        n_kw = len(self.cfg.get("keywords", []))
-        main = min((self._keyword_rank(k) for k in a.keywords), default=n_kw)
-        return ranking.score_parts(a, main, n_kw, now)
 
     def _iid_of(self, art: Article) -> str:
         return next(i for i, a in self.arts.items() if a is art)
@@ -1270,19 +1504,25 @@ class App(tk.Tk):
             self.basic.add(iid, checked=iid in best_ids)   # 베이직: 추천만 선택
             self.pro.add(iid, checked=True)                # 프로: 후보 전체 선택
         self.basic.restyle()
-        self.pro.sort_by("grade", reverse=False)  # 기본: A 가 위 → 키워드 우선순위 → 최신순
+        self.pro.sort_by("grade", reverse=False)  # 기본: 직접 → A → S → B, 그 안에서 점수 높은 순
         self._refresh_pick_box()
         self.cfg["last_search_at"] = dt.datetime.now(KST).isoformat(timespec="minutes")
         config.save(self.cfg)
 
-        n_a = sum(1 for a in found if a.grade == "A")
+        count = lambda g: sum(1 for a in found if a.grade == g)
         merged = sum(len(a.others) for a in found)
+        reasons: dict[str, int] = {}
+        for reason, _w, _a in (self.last_search or {}).get("dropped", []):
+            reasons[reason] = reasons.get(reason, 0) + 1
+        short = {"검증 실패(제목에 키워드 없음)": "제목 검증", "이미 보고한 기사": "기보고", "단순 행사": "행사"}
         src = SOURCE_LABELS[self._source()] + ("+전문지" if self.cfg.get("use_feeds", True) else "")
+        n_best = sum(1 for a in best if a.grade != "직접")
         msg = (f"[{src}] 수집 {raw_count}건"
-               + (f" → 행사 {events_skipped}건 제외" if events_skipped else "")
+               + "".join(f" → {short.get(r, r)} {n}건 제외" for r, n in reasons.items())
                + (f" → 같은 사안 {merged}건 묶음" if merged else "")
-               + (f" → 기보고 {sent_skipped}건 제외" if sent_skipped else "")
-               + f" → 표시 {len(found)}건 (A {n_a} · B {len(found) - n_a}) · ★추천 {len(best)}건 선택됨")
+               + f" → 표시 {len(found)}건 (A {count('A')} · S {count('S')} · B {count('B')})"
+               + (f" · ★추천 {n_best}건" if n_best >= self.cfg["rules"]["best_count"]
+                  else f" · 오늘은 ★추천 {n_best}건 (기준 {self.cfg['rules']['min_score']}점 이상)"))
         if feed_failed:
             msg += f" · 전문지 조회 실패: {', '.join(feed_failed)}"
         self._set_step(2)
@@ -1312,10 +1552,10 @@ class App(tk.Tk):
         self._set_status(f"★추천 {len(ids)}건만 선택")
 
     def _refresh_pick_box(self):
-        """키워드별 선택 목록: 등급 A·B, 그리고 결과에 나온 키워드(건수 포함)."""
+        """키워드별 선택 목록: 등급 A·S·B, 그리고 결과에 나온 키워드(건수 포함)."""
         arts = list(self.arts.values())
         self.pick_targets.clear()
-        for g in ("A", "B"):
+        for g in ("A", "S", "B"):
             n = sum(1 for a in arts if a.grade == g)
             if n:
                 self.pick_targets[f"[등급 {g}] 전체 ({n}건)"] = ("grade", g)
@@ -1380,11 +1620,11 @@ class App(tk.Tk):
             filetypes=[("엑셀 파일", "*.xlsx")])
         if not path:
             return
-        shown = [(self.arts[i], bool(self.pro.checked.get(i)), bool(self.basic.checked.get(i)),
-                  self._score_parts(self.arts[i], ls["at"])) for i in self.pro.order()]
+        shown = [(self.arts[i], bool(self.pro.checked.get(i)), bool(self.basic.checked.get(i)))
+                 for i in self.pro.order()]
         merged = sum(len(a.others) for a, *_ in shown)
         try:
-            export.save_xlsx(path, shown, ls["dropped"], self._export_conditions(shown, merged))
+            export.save_xlsx(path, shown, ls["dropped"], self._export_conditions(shown, merged), ls["cfg"]["rules"])
         except PermissionError:
             messagebox.showerror("결과 내려받기", "파일을 저장하지 못했습니다.\n"
                                  "같은 이름의 파일이 엑셀에서 열려 있으면 닫고 다시 해 주세요.")
@@ -1415,17 +1655,12 @@ class App(tk.Tk):
             ("전문지 조회 실패", ", ".join(ls["feed_failed"]) or "없음"),
             ("이미 보고한 기사 제외", yes(c["exclude_sent"])),
             ("같은 사안 기사 묶기", yes(c["merge_similar"]) + f" (제목 비슷함 기준 {c['similar_threshold']})"),
-            ("단순 행사 기사 제외", yes(c["exclude_events"])),
-            ("추천 건수(베이직)", str(c["best_count"])),
-            ("B 키워드당 최대", str(c["b_max_per_keyword"])),
-            ("A 키워드(순서대로)", "\n".join(c["keywords_a"] or [])),
-            ("B 키워드(위가 우선)", "\n".join(c["keywords_b"] or [])),
-            ("제외어(B에만)", ", ".join(c["exclude_words"] or [])),
-            ("단순 행사 단어", ", ".join(c["event_words"] or [])),
+            ("단순 행사 기사 제외", yes(c["exclude_events"]) + " (A 기사는 빼지 않고 감점)"),
+            ("규칙", "조회한 그때의 규칙 전체는 '선정 규칙' 시트"),
             ("건수 흐름", f"수집 {ls['raw_count']}건"
              + "".join(f" → {r} {n}건 제외" for r, n in reasons.items())
              + (f" → 같은 사안 {merged}건 묶음" if merged else "")
-             + f" → 표시 {len(shown)}건 (A {count('A')} · B {count('B')} · 직접 {count('직접')})"),
+             + f" → 표시 {len(shown)}건 (A {count('A')} · S {count('S')} · B {count('B')} · 직접 {count('직접')})"),
             ("최종 선택", f"프로 {sum(1 for s in shown if s[1])}건 · 베이직 {sum(1 for s in shown if s[2])}건"),
         ]
 
