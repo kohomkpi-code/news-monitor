@@ -23,7 +23,7 @@ DEFAULT_CONFIG = {
     "client_id": "",
     "client_secret": "",
     "keywords_version": 3,     # 기본 키워드 체계가 바뀌면 올린다(v1.0.0: A·S·B 3단 → rules)
-    "feeds_version": 2,        # 기본 전문지 목록이 바뀌면 올린다(v0.9.2: 전기신문 제외)
+    "feeds_version": 3,        # 기본 전문지 목록이 바뀌면 올린다(v0.9.2: 전기신문 제외, v1.0.2: 경남일보 끔)
     "rules": rules.DEFAULT_RULES,
     "rules_version": rules.RULES_VERSION,
     "rules_log": [],
@@ -91,6 +91,12 @@ def load() -> dict:
     if saved and saved.get("feeds_version", 1) < 2:
         # v0.9.2: 전기신문을 기본 전문지에서 뺌 — 저장된 목록에서도 뺀다(직접 추가한 매체는 그대로)
         saved["extra_feeds"] = [f for f in saved.get("extra_feeds", []) if "electimes.com" not in f.get("url", "")]
+    if saved and saved.get("feeds_version", 1) < 3:
+        # v1.0.2: 경남일보는 전문지가 아니라 본사 지역지(점수 가점 목록) — RSS 는 끈다(목록엔 남겨 다시 켤 수 있게)
+        for f in saved.get("extra_feeds", []):
+            if "경남일보" in f.get("name", "") or "gnnews.co.kr" in f.get("url", ""):
+                f["on"] = False
+    if saved:
         saved["feeds_version"] = DEFAULT_CONFIG["feeds_version"]
     cfg.update(saved)
     cfg["rules"] = rules.normalize(cfg.get("rules"))

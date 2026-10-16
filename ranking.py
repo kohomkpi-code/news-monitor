@@ -1,14 +1,16 @@
 """점수·분류·추천 — 규칙(rules.py, [선정 규칙] 탭)대로 계산한다. AI 없이 규칙만으로.
 
 점수(제목 기준, 가중치는 규칙에서 바꿀 수 있다):
-- A 기관 직접 +50 · S 사업어 +30(2개 이상 +40) · 모회사·부처어 +15 · B 환경 +10
-- 리스크어 +20: A·S·모회사어가 같은 제목에 있을 때만 (주제와 무관한 '화재'·'수사'에 점수를 주지 않게)
+- A 기관 직접 +50 · S 사업어 +30(2개 이상 +40, 제목만) · 모회사·부처어 +15 · B 환경 +10(요약까지)
+- 리스크어 +20: A·S·모회사어·B(제목)·리스크 조건어(임대주택·공공임대 …)가 같은 제목에 있을 때만
+  (한강버스·전통시장 같은 일반 뉴스의 '화재'·'수사'에는 점수를 주지 않게)
 - 정책어 +10: S·모회사어·정책 조건어(주거·임대·공동주택)가 같은 제목에 있을 때만
 - 여러 매체가 다룬 사안 1건당 +2(최대 +8) · 전문지 +3 · 본사 지역지 +2(A 일 때만) · 최근 24시간 +3 · [단독] +5
-- 공급·개발어 −15(S 가 없을 때) · A 기사의 단순 행사어 −20 (A 가 아니면 행사 기사는 조회 단계에서 빠진다)
-분류(위에서부터 처음 맞는 것): 리스크(A·S·모회사어 + 리스크어) → 기관 직접(A) → 모회사·부처(모회사어, S 없이)
-  → 정책·제도(정책어 가점·정책·제도어·S) → 공공기관 공통(공공기관 공통어) → 업계·환경
-추천: 리스크 먼저(최대 2) → 공단(A) 최소 1 → 점수순. 같은 분류는 2건까지, 최소 점수 미만은 추천 안 함
+- 공급·개발어 −15(S 가 없을 때) · 일상 공고어(모집·접수·공고) −20(A 가 아닐 때) · A 기사의 단순 행사어 −20
+분류(규칙의 '분류 순서'에서 처음 맞는 것, 기본): 리스크 → 기관 직접(A) → 정책·제도(정책어 가점·정책·제도어)
+  → 모회사·부처(모회사어) → 공공기관 공통(공공기관 공통어) → 업계·환경(나머지)
+  S 사업어만으로는 정책·제도가 아니다. A 가 아닌 공고 기사는 리스크가 아니면 업계·환경.
+추천: 리스크 먼저(최대 2) → 공단(A) 최소 1 → 점수순. 같은 분류 2건까지(업계·환경은 1건), 최소 점수 미만은 추천 안 함
   (5건이 안 차면 그 수만큼만). 직접 추가한 기사는 별도로 항상 포함.
 규칙은 출발점이다. 담당자가 체크를 더하고 빼서 최종 결정하고, 어긋난 것은 규칙 개선으로 환류한다.
 """
@@ -25,24 +27,30 @@ MANUAL_SCORE = 100
 
 def keyword_hits(a: Article, r: dict) -> dict[str, list[str]]:
     """걸린 검색 키워드: A 는 제목만, S·B 는 (설정에 따라) 요약까지."""
-    text = f"{a.title} {a.description}" if r["check_summary"] else a.title
-    return {"A": R.hits(R.a_keywords(r), a.title), "S": R.hits(R.s_keywords(r), text), "B": R.hits(r["kw_b"], text)}
+    full = f"{a.title} {a.description}"
+    return {"A": R.hits(R.a_keywords(r), a.title),
+            "S": R.hits(R.s_keywords(r), full if r["check_summary_s"] else a.title),
+            "B": R.hits(r["kw_b"], full if r["check_summary"] else a.title)}
 
 
 def evaluate(a: Article, r: dict, now: dt.datetime) -> None:
     """점수(a.score), 항목별 점수(a.parts), 걸린 말(a.hits), 자동 분류(a.auto_category)를 채운다."""
     t = a.title
     kh = keyword_hits(a, r)
-    text = f"{t} {a.description}" if r["check_summary"] else t
+    full = f"{t} {a.description}"
+    b_title = R.hits(kh["B"], t)
     h = {"A": kh["A"], "S": kh["S"], "B": kh["B"], "모회사": R.hits(r["parent_words"], t),
          "리스크": R.hits(r["risk_words"], t), "정책": R.hits(r["policy_words"], t), "개발": R.hits(r["dev_words"], t),
-         "행사": R.hits(r["event_words"], t),
-         # 키워드가 맞은 구간(원래 글 그대로) — 점수 근거에 보여 준다
-         "구간": {**R.spans(kh["A"], t), **R.spans(kh["S"] + kh["B"], text)}}
+         "공고": R.hits(r["routine_words"], t), "행사": R.hits(r["event_words"], t),
+         # 키워드가 맞은 구간(원래 글 그대로) — 점수 근거에 보여 준다. 요약에서만 맞은 것은 '(요약)'
+         "구간": {**R.spans(kh["A"], t), **R.spans(kh["S"] + kh["B"], full)},
+         "요약": [w for w in kh["S"] + kh["B"] if not R.matches(w, t)]}
     a.hits = h
     is_a, s, parent = bool(kh["A"]), kh["S"], bool(h["모회사"])
+    routine = bool(h["공고"]) and not is_a
     policy_ok = bool(h["정책"]) and (bool(s) or parent or bool(R.hits(r["policy_context"], t)))
-    risk_ok = bool(h["리스크"]) and (is_a or bool(s) or parent)
+    risk_ok = bool(h["리스크"]) and (is_a or bool(s) or parent or bool(b_title)
+                                    or bool(R.hits(r["risk_context_extra"], t)))
     p = {
         "A 기관": r["w_a"] if is_a else 0,
         "S 사업어": (r["w_s2"] if len(s) >= 2 else r["w_s"]) if s else 0,
@@ -56,25 +64,19 @@ def evaluate(a: Article, r: dict, now: dt.datetime) -> None:
         "최근 24시간": r["w_recent"] if now - a.published <= dt.timedelta(hours=24) else 0,
         "단독": r["w_exclusive"] if _EXCLUSIVE_RE.search(t) else 0,
         "공급·개발": r["w_dev"] if h["개발"] and not s else 0,
+        "공고": r["w_routine"] if routine else 0,
         "행사": r["w_event_a"] if h["행사"] and is_a else 0,
     }
     if a.grade == "직접":
         p = {"직접 추가": MANUAL_SCORE, **p}
     a.parts = p
     a.score = sum(p.values())
-    if risk_ok:
-        cat = "리스크"
-    elif is_a:
-        cat = "기관 직접"
-    elif parent and not s:
-        cat = "모회사·부처"
-    elif policy_ok or s or R.hits(r["cat_policy_words"], t):
-        cat = "정책·제도"
-    elif R.hits(r["cat_public_words"], t):
-        cat = "공공기관 공통"
-    else:
-        cat = "업계·환경"
-    a.auto_category = cat
+    fits = {"리스크": risk_ok, "기관 직접": is_a,
+            "정책·제도": not routine and (policy_ok or bool(R.hits(r["cat_policy_words"], t))),
+            "모회사·부처": not routine and parent,
+            "공공기관 공통": not routine and bool(R.hits(r["cat_public_words"], t)),
+            "업계·환경": True}
+    a.auto_category = next(c for c in r["category_order"] + ["업계·환경"] if fits.get(c))
 
 
 def score_line(a: Article) -> str:
@@ -83,11 +85,14 @@ def score_line(a: Article) -> str:
     h = a.hits
     spans = h.get("구간", {})
     words = {"A 기관": h.get("A"), "S 사업어": h.get("S"), "B 환경": h.get("B"), "모회사·부처": h.get("모회사"),
-             "리스크": h.get("리스크"), "정책": h.get("정책"), "공급·개발": h.get("개발"), "행사": h.get("행사")}
+             "리스크": h.get("리스크"), "정책": h.get("정책"), "공급·개발": h.get("개발"), "공고": h.get("공고"),
+             "행사": h.get("행사")}
+    in_summary = set(h.get("요약", []))
 
     def show(w: str) -> str:
         sp = spans.get(w)
-        return f"{w}「{sp}」" if sp and R._squash(sp) != R._squash(w) else w
+        out = f"{w}「{sp}」" if sp and R._squash(sp) != R._squash(w) else w
+        return out + "(요약)" if w in in_summary else out
 
     bits = []
     for k, v in a.parts.items():
@@ -108,7 +113,8 @@ def pick_best(articles: list[Article], r: dict) -> list[Article]:
 
     def take(a: Article) -> bool:
         cat = a.auto_category
-        if len(picked) >= n or any(a is p for p in picked) or per_cat.get(cat, 0) >= r["per_category_max"]:
+        limit = r["industry_max"] if cat == "업계·환경" else r["per_category_max"]  # 가장 넓은 분류라 더 적게
+        if len(picked) >= n or any(a is p for p in picked) or per_cat.get(cat, 0) >= limit:
             return False
         picked.append(a)
         per_cat[cat] = per_cat.get(cat, 0) + 1

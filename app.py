@@ -793,8 +793,10 @@ class App(tk.Tk):
         row.pack(fill="x")
         ttk.Label(row, text=rules.TEXT_FIELDS["kw_a_branch_with"][0], style="Panel.TLabel").pack(side="left", padx=(0, 6))
         v = tk.StringVar()
-        ttk.Entry(row, textvariable=v, width=8).pack(side="left", padx=(0, 22))
+        ttk.Entry(row, textvariable=v, width=12).pack(side="left", padx=(0, 22))
         self.rule_texts["kw_a_branch_with"] = v
+        row = tk.Frame(body, bg=PANEL)
+        row.pack(fill="x", pady=(8, 0))
         for key, text in rules.FLAG_FIELDS.items():
             fv = tk.BooleanVar()
             ttk.Checkbutton(row, text=text, variable=fv).pack(side="left", padx=(0, 18))
@@ -807,23 +809,27 @@ class App(tk.Tk):
         lists(body, ["event_words", "exclude_media"], height=5)
         hline(inner).pack(fill="x")
 
-        body = section("③ 점수", "제목 기준. 리스크어는 A·S·모회사어가 같은 제목에 있을 때만, 정책어는 S·모회사어·정책 "
-                                "조건어가 있을 때만 점수를 줍니다. 공급·개발어는 S가 없을 때 감점. 감점은 음수로 적습니다.")
+        body = section("③ 점수", "제목 기준. 리스크어는 A·S·모회사어·B·리스크 조건어가 같은 제목에 있을 때만, 정책어는 "
+                                "S·모회사어·정책 조건어가 있을 때만 점수를 줍니다. 공급·개발어는 S가 없을 때, 일상 공고어는 "
+                                "A가 아닐 때 감점. 감점은 음수로 적습니다.")
         numbers(body, ["w_a", "w_s", "w_s2", "w_parent", "w_b", "w_risk", "w_policy", "w_multi_each", "w_multi_max",
-                       "w_specialist", "w_local", "w_recent", "w_exclusive", "w_dev", "w_event_a"])
-        lists(body, ["parent_words", "risk_words", "policy_words"], height=6)
-        lists(body, ["policy_context", "dev_words", "specialist_press", "local_press"], height=5)
+                       "w_specialist", "w_local", "w_recent", "w_exclusive", "w_dev", "w_routine", "w_event_a"])
+        lists(body, ["parent_words", "risk_words", "risk_context_extra"], height=6)
+        lists(body, ["policy_words", "policy_context", "dev_words", "routine_words"], height=5)
+        lists(body, ["specialist_press", "local_press"], height=4)
         hline(inner).pack(fill="x")
 
-        body = section("④ 분류", "위에서부터 처음 맞는 것: 리스크(A·S·모회사어 + 리스크어) → 기관 직접(A) → 모회사·부처"
-                                "(모회사어, S 없이) → 정책·제도(정책어 점수·정책·제도어·S) → 공공기관 공통 → 업계·환경. "
+        body = section("④ 분류", "'분류 순서'에서 위부터 처음 맞는 것. 리스크(리스크어 점수) · 기관 직접(A) · 정책·제도"
+                                "(정책어 점수·정책·제도어) · 모회사·부처(모회사어) · 공공기관 공통(공통어) · 업계·환경(나머지). "
+                                "S 사업어만으로는 정책·제도가 아니고, A가 아닌 공고 기사는 리스크가 아니면 업계·환경. "
                                 "프로 탭에서 AI 선정 결과를 붙여 넣으면 AI 분류가 우선입니다.")
-        lists(body, ["cat_policy_words", "cat_public_words"], height=4)
+        lists(body, ["category_order", "cat_policy_words", "cat_public_words"], height=6)
         hline(inner).pack(fill="x")
 
-        body = section("⑤ 추천 (베이직 ★)", "리스크 먼저(최대 N건) → 공단(A) 최소 N건 → 점수순. 같은 분류는 N건까지, "
-                                          "최소 점수 미만은 추천하지 않습니다(그날은 추천이 적게 나옴). 직접 추가한 기사는 항상 포함.")
-        numbers(body, ["best_count", "min_score", "risk_first_max", "a_min", "per_category_max"])
+        body = section("⑤ 추천 (베이직 ★)", "리스크 먼저(최대 N건) → 공단(A) 최소 N건 → 점수순. 같은 분류는 N건까지"
+                                          "(업계·환경은 따로), 최소 점수 미만은 추천하지 않습니다(그날은 추천이 적게 나옴). "
+                                          "직접 추가한 기사는 항상 포함.")
+        numbers(body, ["best_count", "min_score", "risk_first_max", "a_min", "per_category_max", "industry_max"])
         hline(inner).pack(fill="x")
 
         body = section("변경 이력", "규칙을 저장할 때마다 무엇이 바뀌었는지 남깁니다(최근 10개).")
@@ -894,7 +900,7 @@ class App(tk.Tk):
         old = self.cfg["rules"]
         refetch = any(new[k] != old[k] for k in ("kw_a", "kw_a_branch", "kw_a_branch_with", "kw_s", "complex_names",
                                                  "kw_b", "exclude_words", "event_words", "exclude_media",
-                                                 "exact_search", "check_summary", "max_per_keyword"))
+                                                 "exact_search", "check_summary", "check_summary_s", "max_per_keyword"))
         self.cfg["rules"] = new
         self.cfg["keywords"] = config.all_keywords(self.cfg)
         self.cfg["rules_log"] = (self.cfg.get("rules_log", []) + [rules.log_entry(changes, how, dt.datetime.now(KST))])[-100:]

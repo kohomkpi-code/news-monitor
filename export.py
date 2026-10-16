@@ -27,7 +27,7 @@ HEAD_FONT = Font(bold=True, color="FFFFFF")
 A_FILL = PatternFill("solid", fgColor="FBF3E4")
 MANUAL_FILL = PatternFill("solid", fgColor="E4F0F2")
 PART_KEYS = ["A 기관", "S 사업어", "모회사·부처", "B 환경", "리스크", "정책", "여러 매체", "전문지", "지역지",
-             "최근 24시간", "단독", "공급·개발", "행사"]
+             "최근 24시간", "단독", "공급·개발", "공고", "행사"]
 
 
 def _sheet(ws, heads: list[tuple[str, int]], rows: list[list], fills: list | None = None):
@@ -61,7 +61,8 @@ def save_xlsx(path: str, shown: list[tuple[Article, bool, bool]], dropped: list[
              ("자동 분류", 11), ("AI 분류", 10), ("AI 인사이트", 30), ("키워드", 22), ("날짜", 16), ("매체", 16),
              ("묶인 기사 수", 9), ("제목", 60), ("점수 근거", 50), ("요약", 40), ("링크", 40)]
     heads += [(f"점수:{k}", 9) for k in PART_KEYS]
-    heads += [("걸린 S 사업어", 16), ("걸린 모회사어", 12), ("걸린 리스크어", 14), ("걸린 정책어", 12), ("걸린 공급·개발어", 14)]
+    heads += [("걸린 S 사업어", 16), ("걸린 모회사어", 12), ("걸린 리스크어", 14), ("걸린 정책어", 12), ("걸린 공급·개발어", 14),
+              ("걸린 공고어", 12)]
     rows, fills = [], []
     for n, (a, pro_on, basic_on) in enumerate(shown, 1):
         h = a.hits or {}
@@ -69,7 +70,7 @@ def save_xlsx(path: str, shown: list[tuple[Article, bool, bool]], dropped: list[
                      a.auto_category, a.category, a.insight, ", ".join(a.keywords), _when(a), a.source, len(a.others),
                      a.title, ranking.score_line(a) if a.parts else "", a.description, a.link or a.naver_link]
                     + [a.parts.get(k, 0) for k in PART_KEYS]
-                    + [", ".join(h.get(k, [])) for k in ("S", "모회사", "리스크", "정책", "개발")])
+                    + [", ".join(h.get(k, [])) for k in ("S", "모회사", "리스크", "정책", "개발", "공고")])
         fills.append(MANUAL_FILL if a.grade == "직접" else A_FILL if a.grade == "A" else None)
     _sheet(ws, heads, rows, fills)
 
