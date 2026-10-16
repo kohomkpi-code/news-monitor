@@ -237,3 +237,36 @@ def swatch(parent, fill, border, bg=PANEL, size=10) -> tk.Frame:
     outer.pack_propagate(False)
     tk.Frame(outer, bg=fill).pack(fill="both", expand=True, padx=1, pady=1)
     return outer
+
+
+class ScrollPanel(tk.Frame):
+    """흰 패널 + 내용이 넘칠 때만 세로 스크롤(작은 창 980×640 에서도 아래 항목이 잘리지 않게).
+    내용은 self.inner 에 넣는다."""
+
+    def __init__(self, parent):
+        super().__init__(parent, bg=PANEL, highlightthickness=1, highlightbackground=BORDER, highlightcolor=BORDER)
+        self.canvas = tk.Canvas(self, bg=PANEL, highlightthickness=0, bd=0)
+        self.sb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.sb.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.inner = tk.Frame(self.canvas, bg=PANEL)
+        self._win = self.canvas.create_window(0, 0, window=self.inner, anchor="nw")
+        self.inner.bind("<Configure>", lambda e: self._refresh())
+        self.canvas.bind("<Configure>", lambda e: (self.canvas.itemconfigure(self._win, width=e.width), self._refresh()))
+        self.bind_all("<MouseWheel>", self._wheel, add="+")
+
+    def _refresh(self):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        need = self.inner.winfo_reqheight() > self.canvas.winfo_height() > 1
+        if need and not self.sb.winfo_manager():
+            self.sb.pack(side="right", fill="y", before=self.canvas)
+        elif not need and self.sb.winfo_manager():
+            self.sb.pack_forget()
+            self.canvas.yview_moveto(0)
+
+    def _wheel(self, event):
+        w = self.winfo_containing(event.x_root, event.y_root)
+        while w is not None and w is not self:
+            w = w.master
+        if w is self and self.sb.winfo_manager():
+            self.canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")

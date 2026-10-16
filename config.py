@@ -7,7 +7,7 @@
   B 는 담당자가 수기로 검색하던 목록이고, 적힌 순서가 우선순위다(표 정렬·AI 요청문 순서).
   B 키워드로 찾은 기사라도 제목·요약에 A 키워드가 있으면 A 로 올린다.
   예전 "keywords" 는 두 목록을 합친 값으로 자동으로 맞춘다(하위 호환).
-- extra_feeds: 전문지 RSS 주소 목록. 주소가 바뀌면 여기만 고친다.
+- extra_feeds: 전문지 RSS 목록 [{"name", "url", "on"}]. [설정] 탭 → [전문지 고르기]에서 고친다.
 - event_words: 단순 행사 기사를 거르는 단어(제목에 있으면 A 등급이라도 뺀다). [설정]에서 고친다.
 """
 
@@ -39,9 +39,9 @@ DEFAULT_CONFIG = {
     ],
     "use_feeds": True,         # 전문지 RSS 함께 조회
     "extra_feeds": [
-        {"name": "아파트관리신문", "url": "https://www.aptn.co.kr/rss/allArticle.xml"},
-        {"name": "한국아파트신문", "url": "https://www.hapt.co.kr/rss/allArticle.xml"},
-        {"name": "전기신문", "url": "https://www.electimes.com/rss/allArticle.xml"},
+        {"name": "아파트관리신문", "url": "https://www.aptn.co.kr/rss/allArticle.xml", "on": True},
+        {"name": "한국아파트신문", "url": "https://www.hapt.co.kr/rss/allArticle.xml", "on": True},
+        {"name": "전기신문", "url": "https://www.electimes.com/rss/allArticle.xml", "on": True},
     ],
     "days_back": 2,            # (v0.6 부터 안 씀: 조회 기간은 '직전 영업일 9시~'로 자동)
     "best_count": 5,           # 베이직 탭 추천 건수

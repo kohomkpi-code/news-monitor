@@ -1,7 +1,8 @@
 """전문지 RSS 직접 구독 (구글 뉴스가 잘 못 잡는 전문지 보완).
 
 - 아파트관리신문·한국아파트신문·전기신문처럼 공동주택 관리 실무 기사가 많은 매체의
-  RSS(최신 기사 목록)를 직접 받는다. 주소는 config.json 의 "extra_feeds" 에서 바꾼다.
+  RSS(최신 기사 목록)를 직접 받는다. 매체·주소·사용 여부는 [설정] 탭 → [전문지 고르기]에서
+  정한다(config.json 의 "extra_feeds": [{"name", "url", "on"}]).
 - 전문지 RSS 는 '검색'이 아니라 '최신 글 전체'라서, 제목이나 요약에
   A/B 키워드가 들어간 기사만 남긴다.
 - 키워드 맞추기 규칙(구글 검색과 비슷하게):
@@ -47,6 +48,18 @@ def fetch_feed(name: str, url: str) -> list[rss.RssItem]:
     return rss.parse_items(resp.content, name)
 
 
+def check_feed(name: str, url: str) -> str:
+    """연결 확인: 받아지면 '정상 · 기사 N건 (최신 MM.DD)', 아니면 실패 이유."""
+    try:
+        items = fetch_feed(name, url)
+    except NaverApiError as e:
+        return f"실패 · {str(e).split(': ', 1)[-1][:60]}"
+    if not items:
+        return "받아지지만 기사가 없음 (RSS 주소 확인)"
+    newest = max(it.published for it in items)
+    return f"정상 · 기사 {len(items)}건 (최신 {newest:%m.%d})"
+
+
 def filter_items(items: list[rss.RssItem], feed_name: str, grades: dict[str, str],
                  start_date: dt.date, end_date: dt.date) -> list[Article]:
     """기간 안이고 키워드가 맞는 기사만 Article 로. grades = {키워드: "A" 또는 "B"}."""
@@ -78,7 +91,7 @@ def search_feeds(feeds: list[dict], grades: dict[str, str],
     failed: list[str] = []
     for feed in feeds:
         name, url = feed.get("name", ""), feed.get("url", "")
-        if not url:
+        if not url or not feed.get("on", True):  # 꺼 둔 매체는 건너뜀
             continue
         try:
             found.extend(filter_items(fetch_feed(name, url), name or url, grades, start_date, end_date))

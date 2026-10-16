@@ -645,16 +645,17 @@ class App(tk.Tk):
         page.grid_columnconfigure(1, weight=2, uniform="set")
         page.grid_rowconfigure(0, weight=1)
 
-        left = panel(page)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        scroll = theme.ScrollPanel(page)
+        scroll.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        left = scroll.inner
         self.setting_vars: dict[str, tk.StringVar] = {}
 
         def section(title, desc):
             box = tk.Frame(left, bg=PANEL)
-            box.pack(fill="x", padx=20, pady=(14, 12))
+            box.pack(fill="x", padx=20, pady=(10, 9))
             t = ttk.Label(box, text=title, style="PanelTitle.TLabel")
             t.pack(anchor="w")
-            ttk.Label(box, text=desc, style="PanelDesc.TLabel").pack(anchor="w", pady=(2, 8))
+            ttk.Label(box, text=desc, style="PanelDesc.TLabel").pack(anchor="w", pady=(1, 6))
             return box, t
 
         box, _ = section("기사 출처", "어디에서 기사를 모을지 고릅니다.")
@@ -666,15 +667,19 @@ class App(tk.Tk):
         ttk.Radiobutton(r, text="네이버 (API 키 필요)", value="naver", variable=self.source_var,
                         command=self._on_source_change).pack(side="left")
         self.feeds_var = tk.BooleanVar()
-        names = " · ".join(f.get("name", "") for f in self.cfg.get("extra_feeds", []))
-        ttk.Checkbutton(box, text=f"전문지 RSS 함께 조회   {names}", variable=self.feeds_var).pack(anchor="w", pady=(8, 0))
+        fr = tk.Frame(box, bg=PANEL)
+        fr.pack(fill="x", pady=(4, 0))
+        ttk.Button(fr, text="전문지 고르기 ›", style="Link.TButton", command=self._open_feeds).pack(side="right")
+        ttk.Checkbutton(fr, text="전문지 RSS 함께 조회", variable=self.feeds_var).pack(side="left")
+        self.feeds_summary = ttk.Label(fr, text="", style="PanelDesc.TLabel")
+        self.feeds_summary.pack(side="left", padx=(10, 0))
         hline(left).pack(fill="x")
 
         box, self.naver_title = section("네이버 API", "기사 출처가 '네이버'일 때만 필요합니다.")
         self.naver_entries = []
         for label, key, secret in (("Client ID", "client_id", False), ("Client Secret", "client_secret", True)):
             r = tk.Frame(box, bg=PANEL)
-            r.pack(fill="x", pady=3)
+            r.pack(fill="x", pady=2)
             ttk.Label(r, text=label, style="PanelDesc.TLabel", width=14).pack(side="left")
             v = tk.StringVar()
             self.setting_vars[key] = v
@@ -686,14 +691,14 @@ class App(tk.Tk):
         box, _ = section("보고서", "메일 제목과 보고서 맨 위 제목입니다.")
         for label, key in (("메일 제목", "mail_subject"), ("보고서 제목", "report_title")):
             r = tk.Frame(box, bg=PANEL)
-            r.pack(fill="x", pady=3)
+            r.pack(fill="x", pady=2)
             ttk.Label(r, text=label, style="Panel.TLabel", width=14).pack(side="left")
             v = tk.StringVar()
             self.setting_vars[key] = v
             ttk.Entry(r, textvariable=v, width=36).pack(side="left")
             if key == "mail_subject":
                 self.subject_preview = ttk.Label(box, text="", style="PanelDesc.TLabel")
-                self.subject_preview.pack(anchor="w", padx=(0, 0), pady=(2, 6))
+                self.subject_preview.pack(anchor="w", padx=(0, 0), pady=(1, 3))
                 v.trace_add("write", lambda *a: self._update_subject_preview())
         hline(left).pack(fill="x")
 
@@ -738,6 +743,132 @@ class App(tk.Tk):
         tk.Label(foot, text="모든 값은 이 PC의 config.json에만 저장됩니다.", bg=BG, fg=DESC, font=self.F.desc).pack(side="left")
         ttk.Button(foot, text="설정 저장", width=14, style="PrimaryBig.TButton", command=self._save_settings).pack(side="right")
 
+    def _update_feeds_summary(self):
+        fs = self.cfg.get("extra_feeds", [])
+        on = [f.get("name", "") for f in fs if f.get("on", True)]
+        self.feeds_summary.configure(text=(" · ".join(on) if on else "고른 매체 없음") + f"  ({len(on)}/{len(fs)}곳)")
+
+    def _open_feeds(self):
+        """전문지 고르기: 쓸 매체 체크, 추가·수정·삭제, 연결 확인. [저장]하면 바로 config.json 에."""
+        feeds_ = [dict(f, on=f.get("on", True)) for f in self.cfg.get("extra_feeds", [])]
+        results: dict[int, str] = {}
+
+        def save():
+            self.cfg["extra_feeds"] = [{"name": f["name"], "url": f["url"], "on": f["on"]} for f in feeds_]
+            config.save(self.cfg)
+            win.destroy()
+            self._update_feeds_summary()
+            on = sum(1 for f in feeds_ if f["on"])
+            self._set_status(f"전문지 {on}곳을 함께 조회합니다(전체 {len(feeds_)}곳).", word="설정")
+
+        win, body, _ = self._dialog(
+            "전문지 고르기",
+            "함께 조회할 전문지를 고릅니다. 첫 칸을 눌러 켜고 끄고, 아래 칸에서 매체를 추가·수정합니다.\n"
+            "RSS 주소는 보통 신문사 홈페이지 맨 아래 'RSS' 메뉴에 있습니다 (예: https://www.○○.co.kr/rss/allArticle.xml).",
+            "저장", save)
+        imgs = {k: tk.PhotoImage(master=win, data=getattr(theme.icons, k)) for k in ("CHECK_ON", "CHECK_OFF")}
+        win._imgs = imgs
+        tf = tk.Frame(body, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
+        tf.pack(fill="both", expand=True)
+        tree = ttk.Treeview(tf, columns=("name", "url", "check"), show="tree headings", height=7, selectmode="browse")
+        tree.heading("#0", text="사용", anchor="w")
+        tree.column("#0", width=56, stretch=False)
+        for col, head, width, stretch in (("name", "매체", 130, False), ("url", "RSS 주소", 330, True),
+                                          ("check", "연결 확인", 190, False)):
+            tree.heading(col, text=head, anchor="w")
+            tree.column(col, width=width, stretch=stretch, anchor="w")
+        tree.pack(fill="both", expand=True)
+
+        form = tk.Frame(body, bg=PANEL)
+        form.pack(fill="x", pady=(12, 0))
+        name_v, url_v = tk.StringVar(), tk.StringVar()
+        ttk.Label(form, text="매체", style="PanelTitle.TLabel").pack(side="left", padx=(0, 8))
+        ttk.Entry(form, textvariable=name_v, width=14).pack(side="left")
+        ttk.Label(form, text="RSS 주소", style="PanelTitle.TLabel").pack(side="left", padx=(14, 8))
+        ttk.Entry(form, textvariable=url_v, width=40).pack(side="left", fill="x", expand=True)
+        btns = tk.Frame(body, bg=PANEL)
+        btns.pack(fill="x", pady=(8, 0))
+        row, info = self._info_line(body)
+        row.pack(anchor="w", pady=(10, 0))
+        info.configure(text="고친 내용은 [저장]을 눌러야 반영됩니다.")
+
+        def show(select: int | None = None):
+            tree.delete(*tree.get_children())
+            for i, f in enumerate(feeds_):
+                tree.insert("", "end", iid=str(i), image=imgs["CHECK_ON" if f["on"] else "CHECK_OFF"],
+                            values=(f["name"], f["url"], results.get(i, "")))
+            if select is not None and tree.exists(str(select)):
+                tree.selection_set(str(select))
+
+        def selected() -> int | None:
+            sel = tree.selection()
+            return int(sel[0]) if sel else None
+
+        def on_click(event):
+            iid = tree.identify_row(event.y)
+            if iid and tree.identify_region(event.x, event.y) == "tree":
+                feeds_[int(iid)]["on"] = not feeds_[int(iid)]["on"]
+                show(int(iid))
+                return "break"
+
+        def on_select(_e=None):
+            i = selected()
+            if i is not None:
+                name_v.set(feeds_[i]["name"])
+                url_v.set(feeds_[i]["url"])
+
+        def valid() -> tuple[str, str] | None:
+            name, url = name_v.get().strip(), url_v.get().strip()
+            if not name or not url.startswith("http"):
+                info.configure(text="매체 이름과 http 로 시작하는 RSS 주소를 적어 주세요.")
+                return None
+            return name, url
+
+        def add():
+            v = valid()
+            if v:
+                feeds_.append({"name": v[0], "url": v[1], "on": True})
+                show(len(feeds_) - 1)
+                info.configure(text=f"'{v[0]}'을(를) 추가했습니다. [연결 확인]으로 받아지는지 보세요.")
+
+        def update():
+            i, v = selected(), valid()
+            if i is None:
+                info.configure(text="고칠 매체를 표에서 먼저 고르세요.")
+            elif v:
+                feeds_[i].update(name=v[0], url=v[1])
+                results.pop(i, None)
+                show(i)
+                info.configure(text=f"'{v[0]}'을(를) 고쳤습니다.")
+
+        def delete():
+            i = selected()
+            if i is None:
+                info.configure(text="지울 매체를 표에서 먼저 고르세요.")
+                return
+            gone = feeds_.pop(i)
+            results.clear()
+            show()
+            info.configure(text=f"'{gone['name']}'을(를) 목록에서 뺐습니다.")
+
+        def check():
+            targets = [i for i in ([selected()] if selected() is not None else range(len(feeds_)))]
+            info.configure(text="연결 확인 중…")
+
+            def work():
+                for i in targets:
+                    results[i] = feeds.check_feed(feeds_[i]["name"], feeds_[i]["url"])
+                self.after(0, lambda: (show(selected()), info.configure(
+                    text="연결 확인을 마쳤습니다. '실패'인 매체는 RSS 주소를 고치거나 꺼 두세요.")))
+            threading.Thread(target=work, daemon=True).start()
+
+        for text, cmd in (("＋ 추가", add), ("고친 내용 적용", update), ("삭제", delete)):
+            ttk.Button(btns, text=text, style="Small.TButton", command=cmd).pack(side="left", padx=(0, 8))
+        ttk.Button(btns, text="연결 확인 (고른 매체, 없으면 전체)", style="Small.TButton", command=check).pack(side="right")
+        tree.bind("<Button-1>", on_click)
+        tree.bind("<<TreeviewSelect>>", on_select)
+        show()
+
     def _on_source_change(self):
         naver = self.source_var.get() == "naver"
         for e in self.naver_entries:
@@ -770,6 +901,7 @@ class App(tk.Tk):
         self.holiday_text.insert("1.0", "\n".join(self.cfg.get("holidays", [])))
         self._on_source_change()
         self._update_list_counts()
+        self._update_feeds_summary()
         self._toggle_keywords(bool(self.cfg.get("keywords_collapsed", False)))
         self._update_steps()
         self._on_selection_change()
