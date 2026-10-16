@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
     "best_count": 5,           # 베이직 탭 추천 건수
     "holidays": DEFAULT_HOLIDAYS,  # 공휴일 — 자동 조회 기간 계산용([설정] 탭에서 수정)
     "last_tab": "basic",       # 마지막으로 본 탭
+    "keywords_collapsed": False,  # 프로 탭 키워드 글상자 접힘
     "last_search_at": "",      # 마지막 조회 시각
     "exclude_sent": True,      # 이미 보고한 기사 제외
     "merge_similar": True,     # 제목이 거의 같은 기사 묶기

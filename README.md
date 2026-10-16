@@ -57,8 +57,13 @@ HTML 보고서(제목에 링크)를 만드는 PC 프로그램입니다.
 | `sources.py` | 언론사 도메인 → 매체명 표 |
 | `updater.py` | GitHub Release 확인·자동 교체 |
 | `config.py` | 설정 파일 읽기/쓰기 |
+| `theme.py` | 화면 디자인(색·글꼴·버튼 모양) |
+| `result_table.py` | 결과 표(선택 아이콘·정렬·줄 색) |
+| `icons.py` | 표·체크 아이콘(그림을 글자로 넣어 둔 것, `tools/make_icons.py` 로 다시 만듦) |
+| `assets/fonts/` | Pretendard 글꼴(SIL OFL 1.1, 라이선스 파일 동봉) |
 | `version.py` | 버전 번호 (배포 시 여기만 수정) |
 | `.github/workflows/build.yml` | GitHub 가 exe 를 자동으로 만드는 설정 |
+| `.github/workflows/screens.yml` | 윈도우에서 화면을 찍어 `ci-screens` 브랜치에 올림(개발 확인용) |
 | `docs/개발일지.md` | 개발 과정에서 배운 것·결정한 것 기록 |
 
 ## 보안 메모
