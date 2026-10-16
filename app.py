@@ -36,6 +36,7 @@ import article_fetch
 import calendar_kr
 import config
 import dedup
+import export
 import feeds
 import google_news
 import history
@@ -102,6 +103,7 @@ class App(tk.Tk):
         self.pick_targets: dict[str, tuple[str, str]] = {}  # 키워드별 선택 목록 문구 → ("grade"/"kw", 값)
         self.period: tuple[dt.datetime, dt.date] | None = None  # 마지막 조회 기간
         self.searching = False
+        self.last_search: dict | None = None  # 마지막 조회의 조건·빠진 기사 (결과 내려받기용)
         self.step = 1               # 베이직 단계: 1 조회 → 2 추천 확인 → 3 보고서 → 4 기록 → 5 끝
         self.tab = "basic"
 
@@ -451,12 +453,14 @@ class App(tk.Tk):
 
         foot = tk.Frame(page, bg=BG)
         foot.grid(row=2, column=0, sticky="ew")
-        tk.Label(foot, text="표 머리글을 누르면 그 열로 정렬됩니다.", bg=BG, fg=DESC, font=self.F.desc).pack(side="left")
         for text, cmd, style in (("④ 보고 완료로 기록", lambda: self._mark_sent(self.pro), "Secondary.TButton"),
                                  ("③ HTML 보고서 열기", lambda: self._open_report(self.pro), "Secondary.TButton"),
                                  ("② 선정 결과 붙여넣기", self._open_paste, "Secondary.TButton"),
                                  ("① AI 선별 요청문 복사", self._copy_request, "Primary.TButton")):
             ttk.Button(foot, text=text, style=style, command=cmd).pack(side="right", padx=(8, 0))
+        # 결과·점수 근거를 엑셀로 — Claude 에 붙여 앱 규칙 개선에 쓴다. 창이 좁으면 안내 글이 먼저 가려진다.
+        ttk.Button(foot, text="⤓ 결과 엑셀로 내려받기", style="Small.TButton", command=self._export_results).pack(side="left")
+        tk.Label(foot, text="· 표 머리글을 누르면 정렬", bg=BG, fg=DESC, font=self.F.desc).pack(side="left", padx=(6, 0))
 
     def _toggle_keywords(self, collapsed: bool | None = None):
         if collapsed is None:
@@ -1183,25 +1187,45 @@ class App(tk.Tk):
         for a in found:
             if a.grade != "A" and any(feeds.keyword_matches(k, f"{a.title} {a.description}") for k in a_keywords):
                 a.grade = "A"
+        # 빠진 기사와 이유 — [결과 내려받기] 파일의 '빠진 기사' 시트에 남긴다
+        dropped: list[tuple[str, str, Article]] = []
+
+        def note_dropped(before: list[Article], after: list[Article], reason: str, words: list[str]):
+            kept = {id(a) for a in after}
+            words = [w.strip() for w in words if w.strip()]
+            dropped.extend((reason, ", ".join(ranking.hit_words(a.title, words)), a)
+                           for a in before if id(a) not in kept)
+
         # 제외어는 B 에만 적용한다(A 는 '무조건 포함').
-        found = [a for a in found if a.grade == "A"] + dedup.apply_exclude(
-            [a for a in found if a.grade != "A"], self.cfg.get("exclude_words", []))
+        b_arts = [a for a in found if a.grade != "A"]
+        b_kept = dedup.apply_exclude(b_arts, self.cfg.get("exclude_words", []))
+        note_dropped(b_arts, b_kept, "제외어", self.cfg.get("exclude_words", []))
+        found = [a for a in found if a.grade == "A"] + b_kept
         events_skipped = 0
         if self.cfg.get("exclude_events", True):
             # 단순 행사 기사는 A 등급이라도 뺀다
-            before = len(found)
+            before = found
             found = dedup.apply_exclude(found, self.cfg.get("event_words", []))
-            events_skipped = before - len(found)
+            note_dropped(before, found, "단순 행사", self.cfg.get("event_words", []))
+            events_skipped = len(before) - len(found)
         found = dedup.dedupe(found, self.cfg.get("merge_similar", True),
                              float(self.cfg.get("similar_threshold", 0.85)), self.cfg.get("keywords", []))
         sent_skipped = 0
         if self.cfg.get("exclude_sent", True):
             sent = history.load()
-            before = len(found)
+            before = found
             titles = history.sent_titles(sent, dedup.normalize)
             found = [a for a in found if not history.is_sent(a.all_links, sent)
                      and dedup.normalize(a.title) not in titles]
-            sent_skipped = before - len(found)
+            note_dropped(before, found, "이미 보고한 기사", [])
+            sent_skipped = len(before) - len(found)
+        # 조회한 그때의 조건(내려받기용). 비밀값(네이버 키)은 담지 않는다.
+        cond = {k: self.cfg.get(k) for k in ("keywords_a", "keywords_b", "exclude_words", "event_words",
+                                             "exclude_sent", "merge_similar", "exclude_events", "use_feeds",
+                                             "best_count", "b_max_per_keyword", "similar_threshold")}
+        cond["feeds"] = [f.get("name", "") for f in self.cfg.get("extra_feeds", []) if f.get("on", True)]
+        self.last_search = {"at": dt.datetime.now(KST), "start": start, "end": end, "source": label,
+                            "raw_count": raw_count, "feed_failed": feed_failed, "dropped": dropped, "cfg": cond}
         self.after(0, self._search_done, found, raw_count, sent_skipped, feed_failed, events_skipped)
 
     def _search_failed(self, msg: str):
@@ -1214,16 +1238,19 @@ class App(tk.Tk):
     def _rescore(self):
         """추천 점수를 다시 매기고 추천 5건(★)을 고른다."""
         now = dt.datetime.now(KST)
-        n_kw = len(self.cfg.get("keywords", []))
         arts = list(self.arts.values())
         for a in arts:
-            main = min((self._keyword_rank(k) for k in a.keywords), default=n_kw)
-            a.score = ranking.score(a, main, n_kw, now)
+            a.score = sum(self._score_parts(a, now).values())
         best = ranking.pick_best(arts, self._keyword_rank, int(self.cfg.get("best_count", 5) or 5))
         best_ids = {id(a) for a in best}
         for a in arts:
             a.best = id(a) in best_ids
         return best
+
+    def _score_parts(self, a: Article, now: dt.datetime) -> dict[str, int]:
+        n_kw = len(self.cfg.get("keywords", []))
+        main = min((self._keyword_rank(k) for k in a.keywords), default=n_kw)
+        return ranking.score_parts(a, main, n_kw, now)
 
     def _iid_of(self, art: Article) -> str:
         return next(i for i, a in self.arts.items() if a is art)
@@ -1339,6 +1366,68 @@ class App(tk.Tk):
     def _open_url(self, url: str):
         self._set_status("기사 열기" + (" (원문 주소를 못 찾아 구글 경유)" if google_news.is_google_link(url) else ""))
         webbrowser.open(url)
+
+    def _export_results(self):
+        """프로 표의 결과 전부 + 빠진 기사 + 조회 조건을 엑셀 파일 하나로 저장한다(Claude 환류용)."""
+        if not self.arts or not self.last_search:
+            messagebox.showinfo("결과 내려받기", "먼저 [조회]를 눌러 결과를 만든 뒤 내려받으세요.")
+            return
+        ls = self.last_search
+        folder = os.path.join(os.path.expanduser("~"), "Downloads")
+        path = filedialog.asksaveasfilename(
+            parent=self, title="조회 결과 내려받기", defaultextension=".xlsx",
+            initialdir=folder if os.path.isdir(folder) else None, initialfile=export.default_name(ls["at"]),
+            filetypes=[("엑셀 파일", "*.xlsx")])
+        if not path:
+            return
+        shown = [(self.arts[i], bool(self.pro.checked.get(i)), bool(self.basic.checked.get(i)),
+                  self._score_parts(self.arts[i], ls["at"])) for i in self.pro.order()]
+        merged = sum(len(a.others) for a, *_ in shown)
+        try:
+            export.save_xlsx(path, shown, ls["dropped"], self._export_conditions(shown, merged))
+        except PermissionError:
+            messagebox.showerror("결과 내려받기", "파일을 저장하지 못했습니다.\n"
+                                 "같은 이름의 파일이 엑셀에서 열려 있으면 닫고 다시 해 주세요.")
+            return
+        self._set_status(f"조회 결과 {len(shown)}건 · 빠진 기사 {len(ls['dropped']) + merged}건을 저장했습니다: "
+                         f"{os.path.basename(path)}", word="내려받기 완료")
+        if messagebox.askyesno("결과 내려받기", f"저장했습니다.\n{path}\n\n저장한 폴더를 열까요?"):
+            folder = os.path.dirname(path)
+            if hasattr(os, "startfile"):
+                os.startfile(folder)
+            else:
+                webbrowser.open(folder)
+
+    def _export_conditions(self, shown, merged: int) -> list[tuple[str, str]]:
+        """내려받기 파일의 '조회 조건' 시트 — 조회한 그때의 값."""
+        ls, c = self.last_search, self.last_search["cfg"]
+        yes = lambda v: "예" if v else "아니요"
+        count = lambda g: sum(1 for a, *_ in shown if a.grade == g)
+        reasons: dict[str, int] = {}
+        for reason, _w, _a in ls["dropped"]:
+            reasons[reason] = reasons.get(reason, 0) + 1
+        return [
+            ("앱 버전", f"{APP_TITLE} v{__version__}"),
+            ("조회 시각", f"{ls['at']:%Y-%m-%d %H:%M}"),
+            ("기간", f"{ls['start']:%Y-%m-%d %H:%M} ~ {ls['end']:%Y-%m-%d}"),
+            ("검색 방식", ls["source"] + (" + 전문지 RSS" if c["use_feeds"] else "")),
+            ("전문지 RSS", ", ".join(c["feeds"]) if c["use_feeds"] else "사용 안 함"),
+            ("전문지 조회 실패", ", ".join(ls["feed_failed"]) or "없음"),
+            ("이미 보고한 기사 제외", yes(c["exclude_sent"])),
+            ("같은 사안 기사 묶기", yes(c["merge_similar"]) + f" (제목 비슷함 기준 {c['similar_threshold']})"),
+            ("단순 행사 기사 제외", yes(c["exclude_events"])),
+            ("추천 건수(베이직)", str(c["best_count"])),
+            ("B 키워드당 최대", str(c["b_max_per_keyword"])),
+            ("A 키워드(순서대로)", "\n".join(c["keywords_a"] or [])),
+            ("B 키워드(위가 우선)", "\n".join(c["keywords_b"] or [])),
+            ("제외어(B에만)", ", ".join(c["exclude_words"] or [])),
+            ("단순 행사 단어", ", ".join(c["event_words"] or [])),
+            ("건수 흐름", f"수집 {ls['raw_count']}건"
+             + "".join(f" → {r} {n}건 제외" for r, n in reasons.items())
+             + (f" → 같은 사안 {merged}건 묶음" if merged else "")
+             + f" → 표시 {len(shown)}건 (A {count('A')} · B {count('B')} · 직접 {count('직접')})"),
+            ("최종 선택", f"프로 {sum(1 for s in shown if s[1])}건 · 베이직 {sum(1 for s in shown if s[2])}건"),
+        ]
 
     # ================================================================== 직접 추가 반영·AI 선별 중계
     def _add_manual(self, art: Article):

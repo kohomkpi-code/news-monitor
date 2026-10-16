@@ -26,25 +26,25 @@ SPECIALIST_SOURCES = ["아파트관리신문", "한국아파트신문"]
 PER_KEYWORD = 2
 
 
+def score_parts(art: Article, keyword_rank: int, n_keywords: int, now: dt.datetime) -> dict[str, int]:
+    """점수 항목별 점수(내려받기 파일에 근거로 남긴다). 합계가 score()."""
+    p = {"등급": 100 if art.grade == "직접" else 40 if art.grade == "A" else 0,
+         "키워드 순위": round(20 * max(0, n_keywords - keyword_rank) / n_keywords) if n_keywords else 0,
+         "여러 매체": min(len(art.others), 5) * 4,
+         "여러 키워드": min(max(len(art.keywords) - 1, 0), 3) * 3,
+         "리스크 단어": 15 if hit_words(art.title, RISK_WORDS) else 0,
+         "정책 단어": 6 if hit_words(art.title, POLICY_WORDS) else 0,
+         "전문지": 5 if art.source in SPECIALIST_SOURCES else 0,
+         "최근 24시간": 3 if now - art.published <= dt.timedelta(hours=24) else 0}
+    return p
+
+
+def hit_words(title: str, words: list[str]) -> list[str]:
+    return [w for w in words if w in title]
+
+
 def score(art: Article, keyword_rank: int, n_keywords: int, now: dt.datetime) -> int:
-    s = 0
-    if art.grade == "직접":
-        s += 100
-    elif art.grade == "A":
-        s += 40
-    if n_keywords:
-        s += round(20 * max(0, n_keywords - keyword_rank) / n_keywords)
-    s += min(len(art.others), 5) * 4
-    s += min(max(len(art.keywords) - 1, 0), 3) * 3
-    if any(w in art.title for w in RISK_WORDS):
-        s += 15
-    if any(w in art.title for w in POLICY_WORDS):
-        s += 6
-    if art.source in SPECIALIST_SOURCES:
-        s += 5
-    if now - art.published <= dt.timedelta(hours=24):
-        s += 3
-    return s
+    return sum(score_parts(art, keyword_rank, n_keywords, now).values())
 
 
 def pick_best(articles: list[Article], keyword_rank, n: int = 5) -> list[Article]:
