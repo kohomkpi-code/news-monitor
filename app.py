@@ -768,6 +768,7 @@ class App(tk.Tk):
                 ttk.Label(col, text=desc, style="PanelDesc.TLabel").pack(anchor="w", pady=(0, 4))
                 wrap, text = theme.text_box(col, self.F, height=height)
                 wrap.pack(fill="both", expand=True)
+                text.configure(wrap="word")  # 'A OR B OR C' 처럼 긴 줄도 보이게(화면에서만 접힘, 한 줄 = 한 항목은 그대로)
                 text.bind("<KeyRelease>", lambda e: self._update_rule_counts())
                 self.rule_lists[key] = text
                 self.rule_counts[key] = cnt

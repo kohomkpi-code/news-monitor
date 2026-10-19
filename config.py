@@ -83,6 +83,7 @@ def load() -> dict:
         if saved.get("keywords_a") or saved.get("keywords_b"):
             saved["keywords_backup_v2"] = {"A": saved.get("keywords_a", []), "B": saved.get("keywords_b", [])}
         saved["rules"] = r
+        saved["rules_version"] = rules.RULES_VERSION  # 지금 기본값으로 만들었으니 옛 갱신(보태기)을 다시 할 필요 없음
     for key in ("keywords_a", "keywords_b", "exclude_words", "event_words", "best_count", "b_max_per_keyword",
                 "keywords_collapsed"):
         saved.pop(key, None)

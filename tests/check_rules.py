@@ -6,6 +6,7 @@
 - 2부: 10-16 14:54 조회 검토 지시서(v1.0.2)의 실제 제목 12개와 베스트 5.
 - 3부: 15:10 추가 지시(v1.0.1) — 매칭·제외 매체·약칭, 저장된 규칙 갱신.
 - 4부: 기발송 메일 76건 백테스트 지시(v1.0.3) — 키워드 면제 전문지, 지사명만(A?), 가중치.
+- v1.0.5(10-19 규칙 정리안)로 바뀐 기대값은 '※'로 표시. 5부: 정리안 고유 확인(OR 검색·겹침 세기·공고 추천 제외).
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -101,7 +102,7 @@ P2 = [
     ("서울시, 20일부터 노숙인·쪽방 주민 1천 9백명에 독감 예방 무료접종", 0, lambda a: a is None, "빠짐(S 없음)"),
     ("한전 부산울산본부-부산시, 소상공인 에너지바우처 사용처 확대 협약", 0, lambda a: a and a.auto_category == "업계·환경" and a.score <= 15, "업계·환경, 15 이하"),
     ("\"내 집 마련보다 주거비 관리\"…미래 계획 세우는 임대주택 수요", 0, lambda a: a is None or a.score <= 10, "빠짐 또는 10 이하"),
-    ("[기획 下] 노후 공공임대 34곳 재정비 추진…22곳 '법적 장벽' 넘을까", 0, lambda a: a and a.auto_category in ("업계·환경", "정책·제도") and a.score >= 35, "업계·환경/정책·제도, 35 이상"),
+    ("[기획 下] 노후 공공임대 34곳 재정비 추진…22곳 '법적 장벽' 넘을까", 0, lambda a: a and a.auto_category in ("업계·환경", "정책·제도") and a.score >= 30, "※업계·환경, 30 이상(S 한 줄로 합침)"),
     ("공공임대주택은 '층간소음 기준 미달' 해도 괜찮나? \"민원 생기면 보완\"", 0, lambda a: a and a.auto_category == "리스크" and between(a, 45, 65), "리스크, 55 안팎"),
 ]
 day = []
@@ -130,31 +131,28 @@ checks.append(("여러 낱말: 같은 순서·20자 이내", rules.matches("공�
 checks.append(("한 글자 낱말·빼는 말·검색어", rules.matches("군 관사", "육군 군관사 노후")
                and not rules.matches("분양 -분양전환", "임대 분양전환 가격") and rules.matches("분양 -분양전환", "LH 분양 일정")
                and rules.google_query("공동주택 관리비", True) == '"공동주택" "관리비"'
-               and rules.google_query("주택관리공단 OR 마이홈", True) == "주택관리공단 OR 마이홈"))
+               and rules.google_query("임대료 체납 OR 관리비 대납", True) == '"임대료 체납" OR "관리비 대납"'
+               and rules.google_query("임대주택 -민간임대", True) == "임대주택 -민간임대"))
 em = r["exclude_media"]
 checks.append(("해외 한인 매체 제외(영문은 낱말로)", rules.media_hit(em, "SeattleN", "https://news.google.com/rss/articles/CBMiLA") == "SeattleN"
-               and rules.media_hit(em, "LA중앙일보", "") == "LA" and rules.media_hit(em, "Platum", "") is None
+               and rules.media_hit(em, "LA중앙일보", "") == "LA중앙" and rules.media_hit(em, "Platum", "") is None
                and rules.media_hit(em, "한국경제", "https://www.hankyung.com/la/1") is None))
 kh = ranking.keyword_hits(art("Sh수협은행 소상공인 혜택", desc="임대주택 입주민도 대상"), r)
 checks.append(("'Sh수협은행'은 안 걸림, 'SH 임대주택'은 걸림", not (kh["A"] + kh["S"] + kh["B"])
-               and '"SH 임대주택"' in ranking.keyword_hits(art("SH 임대주택 화재 늘어"), r)["B"]
-               and "SH공사" in ranking.keyword_hits(art("SH공사, 임대주택 하자 보수 지연"), r)["B"]))
+               and any("SH 임대주택" in k for k in ranking.keyword_hits(art("SH 임대주택 화재 늘어"), r)["B"])
+               and any("SH공사" in k for k in ranking.keyword_hits(art("SH공사, 임대주택 하자 보수 지연"), r)["B"])))
 a = judge(art("주거비 걱정…LH 임대주택 하자 보수", desc="공동주택 관리비 인상"))
-checks.append(("요약에서만 맞은 B 는 '(요약)' 표시", a is not None and "공동주택 관리비(요약)" in ranking.score_line(a)))
+checks.append(("요약에서만 맞은 B 는 '(요약)' 표시", a is not None and "「공동주택 관리비」(요약)" in ranking.score_line(a)))
 checks.append(("지사명은 '주택관리공단'과 함께일 때만 A", ranking.keyword_hits(art("국민건강보험공단 서울지사 개소"), r)["A"] == []
                and ranking.keyword_hits(art("주택관리공단 서울지사, 봉사"), r)["A"] != []))
-# 저장된 옛 규칙(v1.0.0)에 갱신분 보태기
-old = rules.normalize(None)
-old.update(kw_a_branch_with="공단", exclude_media=["vietnam.vn", "내 매체"], complex_names=[],
-           kw_s=[w for w in old["kw_s"] if w not in ("쪽방 주거상향", "임대주택 화재")] + ["쪽방", "에너지바우처"],
-           kw_b=[k for k in old["kw_b"] if k not in ('"SH 임대주택"', "SH공사", "서울주택도시공사", "인천도시공사")]
-           + ["SH 임대주택", "iH 주거복지", "노후 공공임대", "내 키워드"])
-up = rules.upgrade(old, 1)
-checks.append(("옛 규칙 갱신(직접 고친 것은 유지)", up["kw_a_branch_with"] == "주택관리공단" and "쪽방" not in up["kw_s"]
-               and "임대주택 화재" in up["kw_s"] and "노후 공공임대" not in up["kw_b"] and '"SH 임대주택"' in up["kw_b"]
-               and "인천도시공사" in up["kw_b"] and "내 키워드" in up["kw_b"] and "내 매체" in up["exclude_media"]
-               and "SeattleN" in up["exclude_media"] and up["complex_names"] == r["complex_names"]
-               and rules.upgrade(up, 1) == up and rules.upgrade(r, 1) == r))
+# 저장된 규칙 갱신(v1.0.5): v1.0.4 기본값을 그대로 쓰던 항목만 새 기본값으로, 고친 항목은 유지
+import copy
+from rules_history import DEFAULTS_V5
+mine = copy.deepcopy(DEFAULTS_V5); mine["kw_s"] = mine["kw_s"] + ["내 사업어"]; mine["w_b"] = 12
+up = rules.upgrade(mine, 5)
+checks.append(("옛 규칙 갱신(기본값 그대로인 항목만 바꿈)", rules.upgrade(DEFAULTS_V5, 5) == r
+               and "내 사업어" in up["kw_s"] and up["w_b"] == 12 and up["kw_b"] == r["kw_b"]
+               and rules.upgrade(r, 5) == r))
 txt = "답변입니다\n```json\n" + rules.to_json(dict(r, w_s=35)) + "\n```\n끝"
 checks.append(("Claude 답변에서 규칙 꺼내기", rules.normalize(rules.from_text(txt))["w_s"] == 35))
 for i, (name, ok) in enumerate(checks, 1):
@@ -167,7 +165,7 @@ P4 = [
     ("숨져도 재산 늘어도 파악 불가…임대주택 부정 입주 심각", "테스트일보", lambda a: a and a.auto_category == "리스크" and a.score >= 45, "리스크, 50 이상"),
     ("세대 내 소방점검 믿을 수 없다 '75%'…원점에서 제도 재검토해야", "아파트관리신문", lambda a: near(a, 25), "전문지 후보, 25 안팎"),
     ("국토부 핵심 공기업 LH와 HUG, 청렴도 나란히 '4등급'", "테스트일보", lambda a: a and a.auto_category == "리스크" and a.score >= 45, "리스크, 50 이상"),
-    ("17년 만에 다시 쪼개지는 LH…174조 부채·9000명 조직 어디로", "테스트일보", lambda a: a and a.auto_category in ("리스크", "모회사·부처") and a.score >= 40, "리스크/모회사·부처, 45 이상"),
+    ("17년 만에 다시 쪼개지는 LH…174조 부채·9000명 조직 어디로", "테스트일보", lambda a: a and a.auto_category in ("리스크", "모회사·부처") and a.score >= 30, "※모회사·부처, 30 이상('쪼개지는' 삭제)"),
     ("주거급여에 관리비 추가…취약계층 체납 비극 없도록", "테스트일보", lambda a: a and a.auto_category == "리스크" and a.score >= 55, "리스크, 60 이상"),
     ("충북지사-괴산시장 상인회, 상생협력 업무협약 체결", "테스트일보", lambda a: a and a.grade == "A?" and near(a, 20), "A?, 20, 추천 제외"),
     ("공공기관 경영공시 지적 5년간 5042건…1년전보다 11% 증가", "테스트일보", lambda a: a and a.auto_category in ("리스크", "공공기관 공통") and a.score >= 25, "리스크/공공기관 공통, 30 이상"),
@@ -187,6 +185,22 @@ print(f"4-10 {'통과' if ok else '실패'} | 지사명만(A?)은 추천 안 함
 ok = rules.matches("부정입주", "임대주택 부정 입주 심각") and rules.matches("부정 입주", "부정입주 적발")
 results.append(ok)
 print(f"4-11 {'통과' if ok else '실패'} | 띄어쓰기 무시(부정입주 = 부정 입주)")
+
+print("\n── 5부: 10-19 규칙 정리안(v1.0.5) ──")
+P5 = [
+    ("OR 키워드는 갈래 중 하나만 맞아도", "전세임대 OR 매입임대" in ranking.keyword_hits(art("LH 매입임대 공실 늘어"), r)["B"]),
+    ("'공공임대주택'은 S 1개로 셈(공공임대·임대주택이 같은 글자)",
+     judge(art("공공임대주택에 무너진 LH 재정", hours=2)).parts["S 사업어"] == r["w_s"]),
+    ("'영구임대주택 … 주거복지사'는 S 2개", judge(art("영구임대주택 자살·고독사 236건…주거복지사 배치")).parts["S 사업어"] == r["w_s2"]),
+    ("'임대주택 수요' 시장 기사는 빠짐", judge(art("\"내 집 마련보다 주거비 관리\"…미래 계획 세우는 임대주택 수요")) is None),
+    ("'쪽방 주거'는 잡고 '쪽방 주민 독감 접종'은 안 잡음", judge(art("쪽방촌 주거환경 개선 착수")) is not None
+     and judge(art("노숙인·쪽방 주민 독감 예방 무료접종")) is None),
+    ("일상 공고(A 아님)는 추천 안 함", not any("모집" in a.title for a in ranking.pick_best(
+        [judge(art("LH 통합공공임대 94호 모집…접수", hours=2))], r))),
+]
+for i, (name, ok) in enumerate(P5, 1):
+    results.append(bool(ok))
+    print(f"5-{i} {'통과' if ok else '실패'} | {name}")
 
 print("\nALL", "PASS" if all(results) else "FAIL", f"{sum(results)}/{len(results)}")
 sys.exit(0 if all(results) else 1)

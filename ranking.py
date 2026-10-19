@@ -14,6 +14,7 @@
   → 모회사·부처(모회사어) → 공공기관 공통(공공기관 공통어) → 업계·환경(나머지)
   S 사업어만으로는 정책·제도가 아니다. A 가 아닌 공고 기사는 리스크가 아니면 업계·환경.
 추천: 리스크 먼저(최대 2) → 공단(A) 최소 1 → 점수순. 같은 분류 2건까지(업계·환경은 1건), 최소 점수 미만은 추천 안 함
+  S 사업어 2개는 서로 다른 글자를 잡았을 때만(공공임대주택 = 1개). 지사명만(A?)·일상 공고(A 제외)는 추천 안 함
   (5건이 안 차면 그 수만큼만). 직접 추가한 기사는 별도로 항상 포함.
 규칙은 출발점이다. 담당자가 체크를 더하고 빼서 최종 결정하고, 어긋난 것은 규칙 개선으로 환류한다.
 """
@@ -65,7 +66,7 @@ def evaluate(a: Article, r: dict, now: dt.datetime) -> None:
     dev_cut = bool(dev) and not s and not h["리스크"] and not h["정책"]
     p = {
         "A 기관": r["w_a"] if is_a else 0,
-        "S 사업어": (r["w_s2"] if len(s) >= 2 else r["w_s"]) if s else 0,
+        "S 사업어": (r["w_s2"] if R.distinct_count(s, full if r["check_summary_s"] else t) >= 2 else r["w_s"]) if s else 0,
         "모회사·부처": r["w_parent"] if parent else 0,
         "B 환경": r["w_b"] if kh["B"] else 0,
         "리스크": r["w_risk"] if risk_ok else 0,
@@ -120,8 +121,9 @@ def pick_best(articles: list[Article], r: dict) -> list[Article]:
     """직접 추가한 기사 전부 + 규칙대로 고른 추천(최대 best_count 건)."""
     n = r["best_count"]
     manual = [a for a in articles if a.grade == "직접"]
-    # 'A?'(지사명만)는 공단 기사인지 사람이 확인해야 하므로 추천하지 않는다
-    cand = sorted((a for a in articles if a.grade not in ("직접", "A?") and a.score >= r["min_score"]),
+    # 'A?'(지사명만)는 공단 기사인지 사람이 확인해야 하므로, 일상 공고(A 제외)는 임원 보고 대상이 아니므로 추천하지 않는다
+    cand = sorted((a for a in articles if a.grade not in ("직접", "A?") and a.score >= r["min_score"]
+                   and not (a.parts.get("공고") and a.grade != "A")),
                   key=lambda a: (-a.score, -a.published.timestamp()))
     picked: list[Article] = []
     per_cat: dict[str, int] = {}
