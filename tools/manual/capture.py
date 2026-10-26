@@ -277,6 +277,7 @@ answer = demo_data.ai_answer(a.arts, a.request_map)
 a._open_paste()
 d = dialog()
 d.geometry("+60+60")
+settle()  # 창을 옮긴 뒤에 위치를 재야 맞다
 boxes = []
 stack = [d]
 while stack:
@@ -348,6 +349,7 @@ find(d, "다음").invoke()
 settle()
 d = dialog()
 d.geometry("+60+60")
+settle()
 shot("11_rules_preview", {"apply": box(find(d, "적용"), d)}, win=d)
 find(d, "적용").invoke()
 settle()
