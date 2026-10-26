@@ -63,6 +63,9 @@ appmod.messagebox.showinfo = appmod.messagebox.showwarning = lambda *a, **k: Non
 W, H = 1280, 800
 a = appmod.App()
 a.geometry(f"{W}x{H}+0+0")
+print("화면 크기:", a.winfo_screenwidth(), "x", a.winfo_screenheight(), "— 창", W, "x", H)
+if a.winfo_screenheight() < H + 80:
+    print("주의: 화면이 작아 창이 잘리거나 작업표시줄에 가릴 수 있음")
 GEO: dict[str, dict] = {}
 
 

@@ -20,6 +20,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: 화면 크기 키우기 (기본 1024×768 은 앱 창이 잘리고 작업표시줄에 가림)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
       - name: 부품 설치
         run: pip install -r requirements.txt pillow playwright
       - name: 화면 찍기
