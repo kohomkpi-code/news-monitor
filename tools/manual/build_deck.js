@@ -50,7 +50,7 @@ function header(slide, { no, part, kicker, title, sub }) {
   if (sub) text(slide, sub, { x: 1.5, y: 1.25, w: 11.2, h: 0.3, fontSize: 12, color: C.gray });
 }
 
-// 화면 1장 + 번호 표시(앰버 테두리 + 번호 글자, 배지 도형 없음). marks: [[위치표 키, 번호, 번호 자리('tl'|'r')], ...]
+// 화면 1장 + 번호 표시(앰버 테두리 + 번호 글자, 배지 도형 없음). marks: [[위치표 키, 번호, 번호 자리('tl'|'r'|'ir')], ...]
 // 표시는 그림 밖으로 나가지 않게 자른다(그림보다 긴 칸 등)
 function shot(slide, name, box, marks = [], opts = {}) {
   const info = G.shots[name];
@@ -71,6 +71,7 @@ function shot(slide, name, box, marks = [], opts = {}) {
       objectName: "표시 " + N[n - 1] });
     let lx, ly;
     if (pos === "r") { lx = Math.min(rx + rw + 0.04, x + w - 0.32); ly = ry + rh / 2 - 0.15; } // 칸 오른쪽
+    else if (pos === "ir") { lx = rx + rw - 0.36; ly = ry + rh / 2 - 0.15; } // 칸 안 오른쪽 끝
     else { ly = ry - 0.3 < y ? ry + 0.02 : ry - 0.3; lx = Math.min(rx - 0.02, x + w - 0.32); } // 왼쪽 위(그림 위 끝이면 안쪽)
     text(slide, N[n - 1], { x: Math.max(x + 0.02, lx), y: ly, w: 0.32, h: 0.3, fontFace: F.xb, fontSize: 17, color: C.amber,
       valign: "middle", align: "left", objectName: "번호 " + N[n - 1] });
@@ -292,14 +293,14 @@ async function buildManual() {
   s = pres.addSlide({ sectionTitle: "03 프로" });
   header(s, { no: "03", part: "teal", kicker: "프로 · 화면", title: "프로 탭: 후보 전체를 보고 직접 고르기",
     sub: "언론보도 담당자용. 등급·점수·분류를 보고 고르며, AI 선별을 함께 쓸 수 있습니다" });
-  shot(s, "06_pro_result", SHOT, [["options", 1], ["keywords", 2], ["select_tools", 3], ["order_tools", 4], ["col_grade", 5], ["ai_steps", 6]]);
+  shot(s, "06_pro_result", SHOT, [["options", 1], ["keywords", 2, "ir"], ["select_tools", 3, "ir"], ["order_tools", 4], ["col_grade", 5, "r"], ["ai_steps", 6]]);
   explain(s, [
     [1, "조회 조건", "이미 보고한 기사 제외·같은 사안 묶기·단순 행사 제외"],
     [2, "키워드 요약", "고치려면 [선정 규칙에서 고치기 ›]"],
     [3, "선택 도구", "전체·★추천만·키워드별로 선택"],
     [4, "순서", "선택 항목 맨 위로, ▲▼, 끌어 놓기"],
     [5, "등급·점수·분류", "머리글을 누르면 그 열로 정렬"],
-    [6, "①~④ 단계", "AI 선별 → 보고서 → 기록"],
+    [6, "단계 버튼", "AI 선별 요청 → 결과 붙여넣기 → 보고서 → 기록"],
   ], { ...RIGHT, gap: 6 });
   s.addNotes("프로 탭. 처음에는 후보 전체가 선택된 채로 나옵니다. 베이직과 같은 기사를 보지만 선택은 따로입니다.");
 
@@ -386,7 +387,7 @@ async function buildManual() {
   explain(s, [
     [1, "가중치", "A 50 · S 30 · 모회사 20 · B 10 · 리스크 20 · 정책 10 · 공고 −25 등"],
     [2, "단어 목록", "리스크어는 공단 관련 주제와 함께일 때만 점수"],
-    [0, "⑤ 추천(아래쪽)", "추천 5건 · 최소 30점 · 리스크 먼저 2건 · 공단 최소 1건 · 같은 분류 2건(업계·환경 1건)"],
+    [0, "추천 기준(화면 아래쪽)", "추천 5건 · 최소 30점 · 리스크 먼저 2건 · 공단 최소 1건 · 같은 분류 2건(업계·환경 1건)"],
   ], RIGHT);
   s.addNotes("점수와 추천 기준. 감점은 음수로 적습니다. 공고 기사(공단 기사 제외)와 지사명만 있는 기사(A?)는 추천하지 않습니다.");
 
