@@ -8,7 +8,8 @@
 - 첫 칸(#0)에 아이콘 하나: 체크 상자 + ★(추천). 칸마다 색을 못 바꾸는 tkinter 제약을 그림으로 피한다.
 - 줄 바탕: 공단(A) 연앰버 · 직접 추가 연틸 · 나머지 줄무늬. 글자: 포함 줄 SemiBold, 빠진 줄 흐린 회색.
 - 순번: 조회 때 매긴 고정 번호(정렬해도 그대로) — AI 선별 요청문의 번호와 같다.
-- 순서 바꾸기: 줄을 누른 뒤 ▲▼(Ctrl+↑↓), [선택 항목 맨 위로]. 보고서는 표에 보이는 순서(체크한 것만)대로 실린다.
+- 순서 바꾸기: 줄을 마우스로 끌어 놓기(체크 칸 말고 제목 등 나머지 칸을 잡고), 줄을 누른 뒤 ▲▼(Ctrl+↑↓),
+  [선택 항목 맨 위로]. 보고서는 표에 보이는 순서(체크한 것만)대로 실린다.
 """
 
 import tkinter as tk
@@ -69,6 +70,11 @@ class ResultTable:
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<Button-1>", self._on_click)
         self.tree.bind("<Double-1>", self._on_double)
+        # 끌어 놓기: 누른 채 6px 넘게 움직이면 시작(그보다 작으면 보통 클릭·더블클릭)
+        self._drag: list | None = None  # [줄 id, 누른 y, 움직였는지]
+        self.tree.bind("<ButtonPress-1>", self._drag_start, add="+")
+        self.tree.bind("<B1-Motion>", self._drag_move, add="+")
+        self.tree.bind("<ButtonRelease-1>", self._drag_end, add="+")
         self.tree.bind("<Control-Up>", lambda e: (self.move_selected(-1), "break")[1])
         self.tree.bind("<Control-Down>", lambda e: (self.move_selected(1), "break")[1])
 
@@ -252,6 +258,43 @@ class ResultTable:
         self._update_headings()
         self.restyle()
         return True
+
+    # ------------------------------------------------------------ 끌어 놓기
+    def _drag_start(self, event):
+        iid = self.tree.identify_row(event.y)
+        # 체크 칸(#0)은 선택·해제, 머리글은 정렬이라 끌기를 시작하지 않는다
+        ok = iid and self.tree.identify_region(event.x, event.y) == "cell"
+        self._drag = [iid, event.y, False] if ok else None
+
+    def _drag_move(self, event):
+        if not self._drag:
+            return
+        iid, y0, moved = self._drag
+        if not moved:
+            if abs(event.y - y0) < 6:
+                return
+            self._drag[2] = True
+            self.tree.selection_set(iid)
+            self.tree.configure(cursor="sb_v_double_arrow")
+        h = self.tree.winfo_height()
+        if event.y < 24:  # 표 위·아래 끝으로 끌면 저절로 넘어간다
+            self.tree.yview_scroll(-1, "units")
+        elif event.y > h - 12:
+            self.tree.yview_scroll(1, "units")
+        target = self.tree.identify_row(max(26, min(event.y, h - 4)))
+        if target and target != iid:
+            self.tree.move(iid, "", self.tree.index(target))
+            self.tree.see(iid)
+
+    def _drag_end(self, _event=None):
+        drag, self._drag = self._drag, None
+        if not drag or not drag[2]:
+            return
+        self.tree.configure(cursor="")
+        self.sort_state = None  # 사람이 정한 순서 — 정렬 표시 끔
+        self._update_headings()
+        self.restyle()
+        self.on_status(f"순서를 옮겼습니다({self.tree.index(drag[0]) + 1}번째 줄) — 이 순서대로 보고서에 실립니다.")
 
     def _update_headings(self):
         for col in self.columns:

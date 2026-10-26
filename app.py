@@ -365,7 +365,7 @@ class App(tk.Tk):
             num.configure(text=str(n))
             total.configure(text=f" / {noun}{all_}건")
         n_basic = self.basic.count()[0]
-        self.basic_foot.configure(text=f"선택한 {n_basic}건이 보고서에 들어갑니다." if self.arts
+        self.basic_foot.configure(text=f"선택한 {n_basic}건이 표 순서대로 보고서에 들어갑니다 · 줄을 끌어 순서 변경" if self.arts
                                   else "조회하면 ★추천 기사가 미리 선택됩니다.")
         self._update_steps()
 
@@ -457,7 +457,7 @@ class App(tk.Tk):
         theme.SegGroup(tools2, [("☑ 선택 항목 맨 위로", lambda: self._checked_to_top(self.pro)),
                                 ("▲ 위로", lambda: self.pro.move_selected(-1)),
                                 ("▼ 아래로", lambda: self.pro.move_selected(1))]).pack(side="left")
-        ttk.Label(tools2, text="줄을 누른 뒤 ▲▼ (Ctrl+↑↓) · 이 순서대로 보고서에 실립니다",
+        ttk.Label(tools2, text="줄을 끌어 옮기거나 ▲▼ · 이 순서대로 보고서에 실립니다",
                   style="PanelDesc.TLabel").pack(side="left", padx=(12, 0))
         ttk.Button(tools2, text="＋ 기사 링크로 추가", style="Small.TButton", command=self._open_add_link).pack(side="right")
         hline(res, BORDER).pack(fill="x")
