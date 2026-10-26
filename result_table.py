@@ -16,6 +16,7 @@ import tkinter as tk
 from tkinter import ttk
 
 import icons
+import rules as R
 import theme
 from naver_api import Article
 from report import CATEGORY_ORDER
@@ -92,7 +93,7 @@ class ResultTable:
             "grade": a.grade,
             "score": a.score,
             "category": a.shown_category,
-            "keyword": ", ".join(a.keywords),
+            "keyword": ", ".join(R.display(k) for k in a.keywords),
             "date": a.published.strftime("%m.%d %H:%M"),
             "source": a.source_label,
             "title": a.title,

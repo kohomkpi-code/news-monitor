@@ -1668,7 +1668,7 @@ class App(tk.Tk):
             for k in a.keywords:
                 counts[k] = counts.get(k, 0) + 1
         for k in sorted(counts, key=self._keyword_rank):
-            self.pick_targets[f"{k} ({counts[k]}건)"] = ("kw", k)
+            self.pick_targets[f"{rules.display(k)} ({counts[k]}건)"] = ("kw", k)
         values = list(self.pick_targets)
         self.pick_box.configure(values=values)
         self.pick_var.set(values[0] if values else "")

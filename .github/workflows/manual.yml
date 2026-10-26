@@ -1,0 +1,37 @@
+# 사용자 매뉴얼용 화면: 손으로 실행(Actions → manual → Run workflow)하면 윈도우에서 시연 기사로 앱 화면을 찍어
+# manual-shots 브랜치에 올린다(PNG + 위치표 geometry.json). 매뉴얼 PPT 는 이 화면으로 만든다.
+
+name: manual
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  shots:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 부품 설치
+        run: pip install -r requirements.txt pillow playwright
+      - name: 화면 찍기
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python tools/manual/capture.py manual_shots
+      - name: manual-shots 브랜치에 올리기
+        run: |
+          cd manual_shots
+          git init -q
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -q -m "manual shots for ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:manual-shots

@@ -195,6 +195,8 @@ P5 = [
     ("'임대주택 수요' 시장 기사는 빠짐", judge(art("\"내 집 마련보다 주거비 관리\"…미래 계획 세우는 임대주택 수요")) is None),
     ("'쪽방 주거'는 잡고 '쪽방 주민 독감 접종'은 안 잡음", judge(art("쪽방촌 주거환경 개선 착수")) is not None
      and judge(art("노숙인·쪽방 주민 독감 예방 무료접종")) is None),
+    ("보고서·표의 키워드 이름은 문법 없이('임대주택 -민간임대 -수요' → '임대주택')",
+     rules.display("임대주택 -민간임대 -수요") == "임대주택" and rules.display("전세임대 OR 매입임대") == "전세임대·매입임대"),
     ("일상 공고(A 아님)는 추천 안 함", not any("모집" in a.title for a in ranking.pick_best(
         [judge(art("LH 통합공공임대 94호 모집…접수", hours=2))], r))),
 ]

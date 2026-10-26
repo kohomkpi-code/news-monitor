@@ -336,6 +336,17 @@ def distinct_count(words: list[str], text: str) -> int:
     return n
 
 
+def display(keyword: str) -> str:
+    """사람에게 보일 키워드 이름 — 빼는말·따옴표를 지우고 OR 는 '·'로.
+    '임대주택 -민간임대 -수요' → '임대주택', '전세임대 OR 매입임대' → '전세임대·매입임대'. (엑셀에는 원래 키워드를 남긴다)"""
+    alts = []
+    for alt in re.split(r"\s+OR\s+", keyword.strip()):
+        words = [t.strip('"') for t in _TOKEN_RE.findall(alt) if not (t.startswith("-") and len(t) > 1)]
+        if words:
+            alts.append(" ".join(words))
+    return "·".join(alts) or keyword
+
+
 def matches(keyword: str, text: str) -> bool:
     return match_span(keyword, text) is not None
 

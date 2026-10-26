@@ -16,6 +16,7 @@ import datetime as dt
 import html
 import os
 
+import rules as R
 from config import app_dir
 from naver_api import Article
 
@@ -90,7 +91,7 @@ def build_html(
         if not items:
             continue
         parts.append(
-            f'<p style="margin:14px 0 4px 0;font-weight:bold;color:#1F3B5C">■ {esc(key)} ({len(items)}건)</p>'
+            f'<p style="margin:14px 0 4px 0;font-weight:bold;color:#1F3B5C">■ {esc(R.display(key))} ({len(items)}건)</p>'
         )
         parts.append('<ul style="margin:0 0 0 18px;padding:0">')
         for art in items:
@@ -98,7 +99,7 @@ def build_html(
             extra = ""
             others = [k for k in art.keywords if k != key]
             if others:
-                extra = f' <span style="color:#999">[{esc(", ".join(others))}]</span>'
+                extra = f' <span style="color:#999">[{esc(", ".join(R.display(k) for k in others))}]</span>'
             parts.append(
                 f'<li style="margin:0 0 3px 0">'
                 f'<a href="{esc(art.link or art.naver_link)}" style="color:#1a4b8f;text-decoration:none">{esc(art.title)}</a>'
