@@ -7,6 +7,8 @@
 모양(디자인 명세 3·6장):
 - 첫 칸(#0)에 아이콘 하나: 체크 상자 + ★(추천). 칸마다 색을 못 바꾸는 tkinter 제약을 그림으로 피한다.
 - 줄 바탕: 공단(A) 연앰버 · 직접 추가 연틸 · 나머지 줄무늬. 글자: 포함 줄 SemiBold, 빠진 줄 흐린 회색.
+- 순번: 조회 때 매긴 고정 번호(정렬해도 그대로) — AI 선별 요청문의 번호와 같다.
+- 순서 바꾸기: 줄을 누른 뒤 ▲▼(Ctrl+↑↓), [선택 항목 맨 위로]. 보고서는 표에 보이는 순서(체크한 것만)대로 실린다.
 """
 
 import tkinter as tk
@@ -21,6 +23,7 @@ GRADE_ORDER = {"직접": 0, "A": 1, "A?": 2, "S": 3, "B": 4, "전문지": 5}
 
 # 열 id → (머리글, 폭, 가운데 정렬, 늘어남)  — 명세 5장 열 폭
 COLUMN_DEFS = {
+    "no": ("순번", 50, True, False),
     "grade": ("등급", 64, True, False),
     "score": ("점수", 52, True, False),
     "category": ("분류", 84, True, False),
@@ -66,6 +69,8 @@ class ResultTable:
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<Button-1>", self._on_click)
         self.tree.bind("<Double-1>", self._on_double)
+        self.tree.bind("<Control-Up>", lambda e: (self.move_selected(-1), "break")[1])
+        self.tree.bind("<Control-Down>", lambda e: (self.move_selected(1), "break")[1])
 
     # ------------------------------------------------------------ 내용
     def _image(self, iid: str):
@@ -77,6 +82,7 @@ class ResultTable:
     def _values(self, iid: str) -> tuple:
         a = self.arts[iid]
         cell = {
+            "no": a.no or "",
             "grade": a.grade,
             "score": a.score,
             "category": a.shown_category,
@@ -184,6 +190,8 @@ class ResultTable:
             return lambda a: (GRADE_ORDER.get(a.grade, 9), -a.score)
         if col == "best":
             return lambda a: (0 if a.grade == "직접" else 1 if a.best else 2, -a.score)
+        if col == "no":
+            return lambda a: a.no
         if col == "score":
             return lambda a: a.score
         if col == "category":
@@ -203,7 +211,7 @@ class ResultTable:
             if self.sort_state and self.sort_state[0] == col:
                 reverse = not self.sort_state[1]
             else:
-                reverse = col in ("date", "score")  # 날짜·점수는 처음 누르면 큰 것부터
+                reverse = col in ("date", "score")  # 날짜·점수는 처음 누르면 큰 것부터(순번은 작은 것부터)
         iids = self.order()
         iids.sort(key=lambda i: self.arts[i].published, reverse=True)
         key = self._sort_key(col)
@@ -221,6 +229,29 @@ class ResultTable:
         self._update_headings()
         self.restyle()
         self.tree.yview_moveto(0)
+
+    def checked_to_top(self) -> int:
+        """선택(☑)한 줄을 지금 순서 그대로 맨 위로 모은다. 모은 건수."""
+        ids = self.checked_iids()
+        self.move_to_top(ids)
+        return len(ids)
+
+    def move_selected(self, delta: int) -> bool:
+        """누른 줄(파란 줄)을 한 칸 위(-1)·아래(+1)로. 움직였으면 True."""
+        sel = self.tree.selection()
+        if not sel:
+            self.on_status("순서를 바꿀 줄을 먼저 누르세요(제목 칸을 한 번 클릭).")
+            return False
+        iid = sel[0]
+        pos = self.tree.index(iid) + delta
+        if not 0 <= pos < len(self.tree.get_children()):
+            return False
+        self.tree.move(iid, "", pos)
+        self.tree.see(iid)
+        self.sort_state = None  # 사람이 정한 순서 — 정렬 표시 끔
+        self._update_headings()
+        self.restyle()
+        return True
 
     def _update_headings(self):
         for col in self.columns:

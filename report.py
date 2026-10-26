@@ -65,14 +65,16 @@ def build_html(
     start_date: dt.date,
     end_date: dt.date,
     title: str = "언론보도 모니터링",
+    keep_order: bool = False,
 ) -> str:
+    """keep_order: 담당자가 표에서 정한 순서를 따른다 — 묶음(분류·키워드)은 처음 나오는 순서로, 묶음 안은 표 순서대로."""
     esc = html.escape
     period = _md(start_date) if start_date == end_date else f"{_md(start_date)} ~ {_md(end_date)}"
     if any(a.category or a.insight for a in articles):
-        return _build_by_category(articles, title, period)
+        return _build_by_category(articles, title, period, keep_order)
 
     # 키워드 순서대로 묶기 (기사는 첫 번째 키워드 아래에만 넣는다)
-    groups: dict[str, list[Article]] = {k: [] for k in keywords}
+    groups: dict[str, list[Article]] = {} if keep_order else {k: [] for k in keywords}
     for art in articles:
         key = next((k for k in keywords if k in art.keywords), art.keywords[0] if art.keywords else "기타")
         groups.setdefault(key, []).append(art)
@@ -121,10 +123,10 @@ def _item_html(art: Article, extra: str = "") -> str:
     )
 
 
-def _build_by_category(articles: list[Article], title: str, period: str) -> str:
-    """AI 선정 결과가 있을 때: 분류별 묶음 + 제목 아래 인사이트."""
+def _build_by_category(articles: list[Article], title: str, period: str, keep_order: bool = False) -> str:
+    """AI 선정 결과가 있을 때: 분류별 묶음 + 제목 아래 인사이트. keep_order 면 분류도 처음 나오는 순서로."""
     esc = html.escape
-    groups: dict[str, list[Article]] = {c: [] for c in CATEGORY_ORDER}
+    groups: dict[str, list[Article]] = {} if keep_order else {c: [] for c in CATEGORY_ORDER}
     for art in articles:
         groups.setdefault(art.category or "참고", []).append(art)
 

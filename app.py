@@ -106,6 +106,7 @@ class App(tk.Tk):
         self.pick_targets: dict[str, tuple[str, str]] = {}  # 키워드별 선택 목록 문구 → ("grade"/"kw", 값)
         self.period: tuple[dt.datetime, dt.date] | None = None  # 마지막 조회 기간
         self.searching = False
+        self.cancel_search = threading.Event()  # [■ 정지] — 조회 중 키워드 사이마다 확인
         self.last_search: dict | None = None  # 마지막 조회의 조건·빠진 기사 (결과 내려받기용)
         self.step = 1               # 베이직 단계: 1 조회 → 2 추천 확인 → 3 보고서 → 4 기록 → 5 끝
         self.tab = "basic"
@@ -278,10 +279,14 @@ class App(tk.Tk):
         row = tk.Frame(per, bg=PANEL)
         row.pack(fill="x", padx=16, pady=12)
         self._period_row(row, ["자동", "오늘", "최근 3일"])
-        ttk.Label(row, text="자동 = 직전 영업일 09:00 ~ 지금", style="PanelDesc.TLabel").pack(side="left", padx=(14, 0))
+        # 버튼을 먼저 놓아야 창이 좁을 때 안내 글이 먼저 가려진다
         self.basic_search_btn = ttk.Button(row, text="① 조회", width=12, style="Primary.TButton",
                                            command=lambda: self._search("basic"))
         self.basic_search_btn.pack(side="right")
+        self.basic_stop_btn = ttk.Button(row, text="■ 정지", width=8, style="Secondary.TButton", command=self._stop_search)
+        self.basic_stop_btn.pack(side="right", padx=(0, 8))
+        self.basic_stop_btn.state(["disabled"])
+        ttk.Label(row, text="자동 = 직전 영업일 09:00 ~ 지금", style="PanelDesc.TLabel").pack(side="left", padx=(14, 0))
 
         # 결과
         res = panel(page)
@@ -299,8 +304,10 @@ class App(tk.Tk):
         ttk.Button(head, text="＋ 기사 링크로 추가", style="Small.TButton", command=self._open_add_link).pack(side="right")
         ttk.Button(head, text="↻ 추천으로 되돌리기", style="Small.TButton",
                    command=lambda: self._select_best(self.basic)).pack(side="right", padx=8)
+        theme.SegGroup(head, [("▲", lambda: self.basic.move_selected(-1)),
+                              ("▼", lambda: self.basic.move_selected(1))]).pack(side="right")
         hline(res, BORDER).pack(fill="x")
-        self.basic = ResultTable(res, ["date", "source", "title"], self.arts, self._keyword_rank,
+        self.basic = ResultTable(res, ["no", "date", "source", "title"], self.arts, self._keyword_rank,
                                  self._open_article, self._set_status, self.F, on_change=self._on_selection_change)
         self.basic.frame.pack(fill="both", expand=True)
 
@@ -414,6 +421,9 @@ class App(tk.Tk):
         self.search_btn = ttk.Button(row, text="조회", width=10, style="Secondary.TButton",
                                      command=lambda: self._search("pro"))
         self.search_btn.pack(side="right")
+        self.stop_btn = ttk.Button(row, text="■ 정지", width=8, style="Secondary.TButton", command=self._stop_search)
+        self.stop_btn.pack(side="right", padx=(0, 8))
+        self.stop_btn.state(["disabled"])
         # 키워드·제외어·점수는 [선정 규칙] 탭 한곳에서 고친다(여기는 요약만)
         kw = tk.Frame(body, bg=PANEL)
         kw.pack(fill="x", pady=(10, 0))
@@ -437,12 +447,21 @@ class App(tk.Tk):
         self.pick_box.pack(side="left")
         theme.SegGroup(tools, [("선택", lambda: self._pick(True)), ("해제", lambda: self._pick(False)),
                                ("이것만", self._pick_only)]).pack(side="left", padx=(10, 0))
-        ttk.Button(tools, text="＋ 기사 링크로 추가", style="Small.TButton", command=self._open_add_link).pack(side="right")
         cnt = tk.Frame(tools, bg=PANEL)
-        cnt.pack(side="right", padx=(0, 14))
+        cnt.pack(side="right")
         self.pro_count = self._count_labels(cnt, "")
+        # 둘째 줄: 순서 — 보고서는 표에 보이는 순서(체크한 것만)대로 실린다
+        tools2 = tk.Frame(res, bg=PANEL)
+        tools2.pack(fill="x", padx=16, pady=(0, 10))
+        ttk.Label(tools2, text="순서", style="PanelTitle.TLabel").pack(side="left", padx=(0, 10))
+        theme.SegGroup(tools2, [("☑ 선택 항목 맨 위로", lambda: self._checked_to_top(self.pro)),
+                                ("▲ 위로", lambda: self.pro.move_selected(-1)),
+                                ("▼ 아래로", lambda: self.pro.move_selected(1))]).pack(side="left")
+        ttk.Label(tools2, text="줄을 누른 뒤 ▲▼ (Ctrl+↑↓) · 이 순서대로 보고서에 실립니다",
+                  style="PanelDesc.TLabel").pack(side="left", padx=(12, 0))
+        ttk.Button(tools2, text="＋ 기사 링크로 추가", style="Small.TButton", command=self._open_add_link).pack(side="right")
         hline(res, BORDER).pack(fill="x")
-        self.pro = ResultTable(res, ["grade", "score", "category", "keyword", "date", "source", "title"],
+        self.pro = ResultTable(res, ["no", "grade", "score", "category", "keyword", "date", "source", "title"],
                                self.arts, self._keyword_rank, self._open_article, self._set_status, self.F,
                                on_change=self._on_selection_change, widths={"source": 140})
         self.pro.frame.pack(fill="both", expand=True)
@@ -450,7 +469,7 @@ class App(tk.Tk):
         foot = tk.Frame(page, bg=BG)
         foot.grid(row=2, column=0, sticky="ew")
         for text, cmd, style in (("④ 보고 완료로 기록", lambda: self._mark_sent(self.pro), "Secondary.TButton"),
-                                 ("③ HTML 보고서 열기", lambda: self._open_report(self.pro), "Secondary.TButton"),
+                                 ("③ HTML 보고서 열기", lambda: self._open_report(self.pro, keep_order=True), "Secondary.TButton"),
                                  ("② 선정 결과 붙여넣기", self._open_paste, "Secondary.TButton"),
                                  ("① AI 선별 요청문 복사", self._copy_request, "Primary.TButton")):
             ttk.Button(foot, text=text, style=style, command=cmd).pack(side="right", padx=(8, 0))
@@ -1396,11 +1415,31 @@ class App(tk.Tk):
             return
 
         self.searching = True
-        for b in (self.search_btn, self.basic_search_btn):
-            b.state(["disabled"])
+        self.cancel_search.clear()
+        self._search_buttons(busy=True)
         self._clear_results()
         self.period = (start, end)
         threading.Thread(target=self._search_worker, args=(grades, start, end), daemon=True).start()
+
+    def _search_buttons(self, busy: bool):
+        """조회 중이면 [조회] 끄고 [■ 정지] 켬, 끝나면 반대."""
+        for b in (self.search_btn, self.basic_search_btn):
+            b.state(["disabled"] if busy else ["!disabled"])
+        for b in (self.stop_btn, self.basic_stop_btn):
+            b.state(["!disabled"] if busy else ["disabled"])
+
+    def _stop_search(self):
+        if not self.searching:
+            return
+        self.cancel_search.set()
+        for b in (self.stop_btn, self.basic_stop_btn):
+            b.state(["disabled"])
+        self._set_status("멈추는 중… 지금 묻고 있는 키워드 하나가 끝나면 멈춥니다.", word="정지 중", kind="busy")
+
+    def _search_stopped(self):
+        self.searching = False
+        self._search_buttons(busy=False)
+        self._set_status("조회를 멈췄습니다. 기간·규칙을 고친 뒤 다시 [조회]를 누르세요.", word="조회 멈춤", kind="info")
 
     def _search_worker(self, grades: dict[str, str], start: dt.datetime, end: dt.date):
         source = self._source()
@@ -1412,7 +1451,10 @@ class App(tk.Tk):
             per_kw = max(0, int(r["max_per_keyword"]))
             n = len(grades)
             for i, kw in enumerate(grades, 1):
-                msg = f"{label} 검색 중 · 키워드 {i}/{n} '{kw}' · 지금까지 {len(found)}건 수집"
+                if self.cancel_search.is_set():
+                    self.after(0, self._search_stopped)
+                    return
+                msg = f"{label} 검색 중 · 키워드 {i}/{n} '{kw}' · 지금까지 {len(found)}건 수집 · [■ 정지]로 멈출 수 있음"
                 self.after(0, lambda m=msg, p=(i - 1) / n: self._set_status(m, word="조회 중", kind="busy", progress=p))
                 is_a = grades[kw] == "A"
                 if source == "naver":
@@ -1427,6 +1469,9 @@ class App(tk.Tk):
                 for a in arts:
                     a.grade = grades[kw]
                 found.extend(arts)
+            if self.cancel_search.is_set():
+                self.after(0, self._search_stopped)
+                return
             if self.cfg.get("use_feeds", True) and self.cfg.get("extra_feeds"):
                 self.after(0, lambda: self._set_status("전문지 RSS 조회 중…", word="조회 중", kind="busy", progress=0.97))
                 arts, feed_failed = feeds.search_feeds(self.cfg["extra_feeds"], grades, start.date(), end,
@@ -1512,8 +1557,7 @@ class App(tk.Tk):
 
     def _search_failed(self, msg: str):
         self.searching = False
-        for b in (self.search_btn, self.basic_search_btn):
-            b.state(["!disabled"])
+        self._search_buttons(busy=False)
         self._set_status(msg.splitlines()[0], word="조회 실패", kind="error")
         messagebox.showerror("조회 실패", msg)
 
@@ -1534,9 +1578,11 @@ class App(tk.Tk):
 
     def _search_done(self, found: list[Article], raw_count: int, sent_skipped: int, feed_failed: list[str],
                      events_skipped: int = 0):
+        if self.cancel_search.is_set():  # 마지막 키워드 뒤에 [■ 정지]를 눌렀으면 결과도 버린다
+            self._search_stopped()
+            return
         self.searching = False
-        for b in (self.search_btn, self.basic_search_btn):
-            b.state(["!disabled"])
+        self._search_buttons(busy=False)
         for art in found:
             art.keywords.sort(key=self._keyword_rank)
             self._new_iid(art)
@@ -1548,6 +1594,10 @@ class App(tk.Tk):
             self.pro.add(iid, checked=True)                # 프로: 후보 전체 선택
         self.basic.restyle()
         self.pro.sort_by("grade", reverse=False)  # 기본: 직접 → A → S → B, 그 안에서 점수 높은 순
+        for n, iid in enumerate(self.pro.order(), 1):  # 순번: 이 순서로 고정(정렬해도 그대로, AI 요청문 번호와 같음)
+            self.arts[iid].no = n
+        for t in (self.basic, self.pro):
+            t.refresh()
         self._refresh_pick_box()
         self.cfg["last_search_at"] = dt.datetime.now(KST).isoformat(timespec="minutes")
         config.save(self.cfg)
@@ -1594,6 +1644,11 @@ class App(tk.Tk):
         self.pick_var.set("")
 
     # ------------------------------------------------------------ 선택 도구
+    def _checked_to_top(self, table: ResultTable):
+        n = table.checked_to_top()
+        self._set_status(f"선택한 {n}건을 맨 위로 모았습니다. 줄을 누르고 ▲▼로 순서를 정하면 그 순서대로 보고서에 실립니다."
+                         if n else "선택한 기사가 없습니다.")
+
     def _select_best(self, table: ResultTable):
         ids = [i for i, a in self.arts.items() if a.best or a.grade == "직접"]
         table.set_only(ids)
@@ -1718,6 +1773,7 @@ class App(tk.Tk):
         """직접 추가한 기사: 두 탭 모두 맨 위에, 선택된 채로. 이미 있는 기사면 그 줄을 선택해 올린다."""
         iid = next((i for i, a in self.arts.items() if url_key(a) == url_key(art)), None)
         if iid is None:
+            art.no = max((a.no for a in self.arts.values()), default=0) + 1  # 순번은 맨 뒤 번호 다음
             iid = self._new_iid(art)
             self._rescore()
             self.basic.add(iid, checked=True, top=True)
@@ -1743,17 +1799,18 @@ class App(tk.Tk):
         self.clipboard_append(text)
         self.update()  # 클립보드 내용을 확정
         # 붙여넣기 때 번호로 기사를 찾으려고, 복사한 순간의 번호↔줄을 기억해 둔다(그 뒤 정렬해도 안전)
-        self.request_map = {n: iid for n, iid in enumerate(iids, 1)}
+        self.request_map = {self.arts[iid].no: iid for iid in iids}  # 번호 = 표의 '순번'
+
         self._set_status(f"선별 요청문 {len(iids)}건 복사됨 → Claude 프로젝트 채팅에 붙여 넣으세요")
 
     def _open_paste(self):
         if not self.request_map:
             messagebox.showinfo("선정 결과 붙여넣기", "먼저 '① AI 선별 요청문 복사'를 누르고 Claude 에게 보내세요.\n"
-                                "번호는 그때 복사한 목록 기준입니다.")
+                                "번호는 표의 '순번'과 같습니다.")
             return
 
         def apply():
-            picked, ignored = selection.parse_selection(box.get("1.0", "end"), len(self.request_map))
+            picked, ignored = selection.parse_selection(box.get("1.0", "end"), set(self.request_map))
             if not picked:
                 info.configure(text="읽을 수 있는 줄이 없습니다. 형식: 번호|분류|한 줄 인사이트")
                 return
@@ -1774,7 +1831,7 @@ class App(tk.Tk):
         info.configure(text="붙여 넣으면 찾은 기사 수가 여기에 나옵니다.")
 
         def check(_e=None):
-            picked, ignored = selection.parse_selection(box.get("1.0", "end"), len(self.request_map))
+            picked, ignored = selection.parse_selection(box.get("1.0", "end"), set(self.request_map))
             if picked:
                 info.configure(text=f"기사 {len(picked)}건을 찾았습니다. [적용]을 누르면 이 {len(picked)}건만 선택됩니다."
                                + (f" (무시된 줄 {ignored}개)" if ignored else ""))
@@ -1883,7 +1940,7 @@ class App(tk.Tk):
     def _report_done(self, report_items: list[Article], failed: int, keep_order: bool):
         start, end = self.period or (parse_start(self.start_var.get()), parse_date(self.end_var.get()))
         body = report.build_html(report_items, self.cfg["keywords"], start.date(), end,
-                                 self.cfg.get("report_title", "언론보도 모니터링"))
+                                 self.cfg.get("report_title", "언론보도 모니터링"), keep_order=keep_order)
         mail_items = report_items if keep_order else report.ordered_for_mail(report_items, self.cfg["keywords"])
         simple = report.build_simple_html(mail_items)
         subject = report.mail_subject(self.cfg.get("mail_subject", report.DEFAULT_SUBJECT), dt.date.today())

@@ -43,6 +43,7 @@ class Article:
     others: list = field(default_factory=list)  # 같은 사안으로 묶인 다른 기사 [(매체, 제목, 링크)]
     score: int = 0       # 추천 점수 (ranking.py)
     best: bool = False   # 추천 5건에 뽑혔는지
+    no: int = 0          # 순번 — 조회마다 매기는 고정 번호(표 '순번' 열 = AI 선별 요청문 번호)
     auto_category: str = ""  # 규칙으로 추정한 분류 (AI 분류 category 가 없으면 이것을 보여 준다)
     parts: dict = field(default_factory=dict)  # 점수 항목별 점수 (ranking.evaluate)
     hits: dict = field(default_factory=dict)   # 점수에 쓰인 걸린 말 (S 사업어·리스크어 …)
