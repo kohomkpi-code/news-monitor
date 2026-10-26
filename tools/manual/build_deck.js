@@ -1,7 +1,7 @@
 // KOHOM 뉴스룸 사용자 매뉴얼 PPT 만들기 — 화면(capture.py 결과)과 위치표(geometry.json)로 슬라이드를 짓는다.
 // 사용: node build_deck.js <화면 폴더> <출력 폴더>
 //   필요한 부품: pptxgenjs, react, react-dom, react-icons, sharp (npm). 화면 폴더는 Actions 'manual' 결과(manual-shots 브랜치).
-// 공단 PPT 표준: 16:9(13.33×7.5in), 흰 배경, 여백 0.6in, 에스코어 드림 7·5·4, 네이비·틸·앰버, 슬라이드당 그림 1장,
+// 공단 PPT 표준: 16:9(13.33×7.5in), 흰 배경, 여백 0.6in, Pretendard Bold·SemiBold·Regular(앱 내장 글꼴과 같음), 네이비·틸·앰버, 슬라이드당 그림 1장,
 //   제목 왼쪽 번호 블록(0.7in) + 틸 키커, 제목 아래 선 없음, 아이콘은 Lucide(react-icons/lu), 모든 슬라이드에 발표자 노트.
 const fs = require("fs");
 const path = require("path");
@@ -17,7 +17,8 @@ const G = JSON.parse(fs.readFileSync(path.join(SHOTS, "geometry.json"), "utf8"))
 const VER = G.app_version;
 const DATE = "2026. 10. 26.";
 
-const F = { xb: "S-Core Dream 7 ExtraBold", md: "S-Core Dream 5 Medium", rg: "S-Core Dream 4 Regular" };
+// Pretendard: Regular·Bold 는 "Pretendard"(Bold 는 굵게 켬), SemiBold 는 별도 이름 "Pretendard SemiBold"(글꼴 파일 이름표 그대로)
+const F = { xb: "Pretendard", md: "Pretendard SemiBold", rg: "Pretendard" };
 const C = { navy: "1F3B5C", teal: "2E7D8C", amber: "E8A33D", card: "F3F6F9", tealBg: "E4F0F2", amberBg: "FBF3E4",
   text: "1E2A36", gray: "667385", line: "CBD5DF", white: "FFFFFF" };
 const PART = { navy: C.navy, teal: C.teal, amber: C.amber };
@@ -44,9 +45,9 @@ function text(slide, t, o) {
 function header(slide, { no, part, kicker, title, sub }) {
   slide.addShape("roundRect", { x: M, y: 0.5, w: 0.7, h: 0.7, rectRadius: 0.12, fill: { color: PART[part] },
     line: { color: PART[part] }, objectName: "번호 블록" });
-  text(slide, no, { x: M, y: 0.5, w: 0.7, h: 0.7, align: "center", valign: "middle", fontFace: F.xb, fontSize: 20, color: C.white });
+  text(slide, no, { x: M, y: 0.5, w: 0.7, h: 0.7, align: "center", valign: "middle", fontFace: F.xb, bold: true, fontSize: 20, color: C.white });
   text(slide, kicker, { x: 1.5, y: 0.42, w: 11.2, h: 0.28, fontFace: F.md, fontSize: 10.5, color: C.teal });
-  text(slide, title, { x: 1.5, y: 0.68, w: 11.2, h: 0.55, fontFace: F.xb, fontSize: 26, color: C.navy, valign: "middle" });
+  text(slide, title, { x: 1.5, y: 0.68, w: 11.2, h: 0.55, fontFace: F.xb, bold: true, fontSize: 26, color: C.navy, valign: "middle" });
   if (sub) text(slide, sub, { x: 1.5, y: 1.25, w: 11.2, h: 0.3, fontSize: 12, color: C.gray });
 }
 
@@ -73,7 +74,7 @@ function shot(slide, name, box, marks = [], opts = {}) {
     if (pos === "r") { lx = Math.min(rx + rw + 0.04, x + w - 0.32); ly = ry + rh / 2 - 0.15; } // 칸 오른쪽
     else if (pos === "ir") { lx = rx + rw - 0.36; ly = ry + rh / 2 - 0.15; } // 칸 안 오른쪽 끝
     else { ly = ry - 0.3 < y ? ry + 0.02 : ry - 0.3; lx = Math.min(rx - 0.02, x + w - 0.32); } // 왼쪽 위(그림 위 끝이면 안쪽)
-    text(slide, N[n - 1], { x: Math.max(x + 0.02, lx), y: ly, w: 0.32, h: 0.3, fontFace: F.xb, fontSize: 17, color: C.amber,
+    text(slide, N[n - 1], { x: Math.max(x + 0.02, lx), y: ly, w: 0.32, h: 0.3, fontFace: F.xb, bold: true, fontSize: 17, color: C.amber,
       valign: "middle", align: "left", objectName: "번호 " + N[n - 1] });
   }
   return { x, y, w, h };
@@ -141,7 +142,7 @@ async function buildManual() {
   s.background = { color: C.navy };
   s.addShape("rect", { x: 1.0, y: 2.0, w: 0.16, h: 2.7, fill: { color: C.amber }, line: { color: C.amber }, objectName: "앰버 세로 블록" });
   text(s, "언론보도 모니터링 앱", { x: 1.45, y: 2.0, w: 10, h: 0.4, fontFace: F.md, fontSize: 16, color: "C9D6E3" });
-  text(s, "KOHOM 뉴스룸 사용자 매뉴얼", { x: 1.45, y: 2.45, w: 11, h: 0.95, fontFace: F.xb, fontSize: 44, color: C.white, valign: "middle" });
+  text(s, "KOHOM 뉴스룸 사용자 매뉴얼", { x: 1.45, y: 2.45, w: 11, h: 0.95, fontFace: F.xb, bold: true, fontSize: 44, color: C.white, valign: "middle" });
   text(s, "설치부터 매일 보고, AI 선별, 선정 규칙 환류까지", { x: 1.45, y: 3.5, w: 10, h: 0.4, fontSize: 16, color: "DCE5EE" });
   text(s, `${DATE} · 앱 v${VER} 기준 · 주택관리공단 전략과`, { x: 1.45, y: 4.2, w: 10, h: 0.35, fontSize: 12, color: "C9D6E3" });
   text(s, "※ 화면은 설명을 위한 시연 기사로 촬영했습니다. 실제 화면의 기사·건수는 다를 수 있으며, 수치·문구는 앱 화면이 우선합니다",
@@ -458,7 +459,7 @@ async function buildManual() {
     ["미확인 — 화면", ["윈도우 경고 창(설치 장), 그룹웨어 편지쓰기(메일 보내기 장)는 자동 촬영이 안 돼 자리표시자로 둠 — 담당자 PC에서 찍어 넣고 자리표시자 삭제",
       "결과 엑셀 화면은 표로 대신함"]],
     ["(추정) — 시간·글꼴", ["조회 시간 1~2분은 키워드 67개 기준 추정",
-      "이 PPT는 에스코어 드림 글꼴로 지정 — 글꼴이 없는 PC에서는 대체 글꼴로 보여 줄바꿈이 다를 수 있음"]],
+      "이 PPT는 Pretendard 글꼴로 지정 — 글꼴이 없는 PC에서는 대체 글꼴로 보여 줄바꿈이 다를 수 있음(앱 저장소 assets/fonts 3종 설치)"]],
     ["시연 자료", ["화면 속 기사·건수·날짜는 설명용 시연 자료(실제 기사 아님)",
       "앱 v" + VER + " 기준 — 앱이 바뀌면 Actions 'manual'로 화면을 다시 찍어 갱신"]],
     ["전문지", ["대한경제·한국주택경제신문 RSS 주소 미확인", "전기신문 RSS는 꺼 둠(전문지 고르기에서 켤 수 있음)"]],
