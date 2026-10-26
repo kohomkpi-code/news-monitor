@@ -50,7 +50,8 @@ function header(slide, { no, part, kicker, title, sub }) {
   if (sub) text(slide, sub, { x: 1.5, y: 1.25, w: 11.2, h: 0.3, fontSize: 12, color: C.gray });
 }
 
-// 화면 1장 + 번호 표시(앰버 테두리 + 번호 글자, 배지 도형 없음). marks: [[위치표 키, 번호], ...]
+// 화면 1장 + 번호 표시(앰버 테두리 + 번호 글자, 배지 도형 없음). marks: [[위치표 키, 번호, 번호 자리('tl'|'r')], ...]
+// 표시는 그림 밖으로 나가지 않게 자른다(그림보다 긴 칸 등)
 function shot(slide, name, box, marks = [], opts = {}) {
   const info = G.shots[name];
   const [iw, ih] = info.size;
@@ -60,36 +61,33 @@ function shot(slide, name, box, marks = [], opts = {}) {
   const s = w / iw;
   slide.addImage({ path: path.join(SHOTS, name + ".png"), x, y, w, h, altText: opts.alt || name, objectName: "화면 " + name });
   slide.addShape("rect", { x, y, w, h, fill: { type: "none" }, line: { color: C.line, width: 0.75 }, objectName: "화면 테두리" });
-  for (const [key, n] of marks) {
+  for (const [key, n, pos = "tl"] of marks) {
     const m = info.marks[key];
     if (!m) { console.warn("위치표 없음:", name, key); continue; }
-    const rx = x + m[0] * s - 0.03, ry = y + m[1] * s - 0.03, rw = m[2] * s + 0.06, rh = m[3] * s + 0.06;
+    const x0 = Math.max(0, m[0]), y0 = Math.max(0, m[1]);
+    const x1 = Math.min(iw, m[0] + m[2]), y1 = Math.min(ih, m[1] + m[3]);
+    const rx = x + x0 * s - 0.03, ry = y + y0 * s - 0.03, rw = (x1 - x0) * s + 0.06, rh = (y1 - y0) * s + 0.06;
     slide.addShape("rect", { x: rx, y: ry, w: rw, h: rh, fill: { type: "none" }, line: { color: C.amber, width: 2.25 },
       objectName: "표시 " + N[n - 1] });
-    const ly = ry - 0.3 < y ? ry + 0.02 : ry - 0.3; // 그림 위 끝이면 안쪽에
-    const lx = Math.min(rx - 0.02, x + w - 0.32);
+    let lx, ly;
+    if (pos === "r") { lx = Math.min(rx + rw + 0.04, x + w - 0.32); ly = ry + rh / 2 - 0.15; } // 칸 오른쪽
+    else { ly = ry - 0.3 < y ? ry + 0.02 : ry - 0.3; lx = Math.min(rx - 0.02, x + w - 0.32); } // 왼쪽 위(그림 위 끝이면 안쪽)
     text(slide, N[n - 1], { x: Math.max(x + 0.02, lx), y: ly, w: 0.32, h: 0.3, fontFace: F.xb, fontSize: 17, color: C.amber,
       valign: "middle", align: "left", objectName: "번호 " + N[n - 1] });
   }
   return { x, y, w, h };
 }
 
-// 오른쪽 설명: [번호, 머리, 본문]. 본문 14pt, 머리 15pt
-function explain(slide, items, { x, y, w, gap = 0.16 }) {
-  const perLine = Math.floor((w * 72) / 14 * 0.93);
-  let cy = y;
-  for (const [n, head, body] of items) {
-    text(slide, (n ? N[n - 1] + " " : "") + head, { x, y: cy, w, h: 0.32, fontFace: F.md, fontSize: 15, color: C.navy });
-    cy += 0.34;
-    if (body) {
-      const lines = body.split("\n").reduce((k, l) => k + Math.max(1, Math.ceil(l.length / perLine)), 0);
-      const bh = lines * 0.27 + 0.04;
-      text(slide, body, { x, y: cy, w, h: bh, fontSize: 14, color: C.text, lineSpacingMultiple: 1.05 });
-      cy += bh;
-    }
-    cy += gap;
-  }
-  return cy;
+// 오른쪽 설명: [번호, 머리, 본문] — 한 글상자 안에 문단으로(실제 글꼴에서 간격이 저절로 고르게). 머리 15pt, 본문 14pt
+function explain(slide, items, { x, y, w, h = 6.9 - y, gap = 10 }) {
+  const runs = [];
+  items.forEach(([n, head, body], i) => {
+    runs.push({ text: (n ? N[n - 1] + " " : "") + head, options: { fontFace: F.md, fontSize: 15, color: C.navy, breakLine: true,
+      paraSpaceBefore: i ? gap : 0 } });
+    if (body) runs.push({ text: body, options: { fontFace: F.rg, fontSize: 14, color: C.text, breakLine: i < items.length - 1,
+      paraSpaceBefore: 2 } });
+  });
+  text(slide, runs, { x, y, w, h, objectName: "설명" });
 }
 
 async function card(slide, { x, y, w, h, title, body, iconName, fill = C.card, iconColor = C.navy, big = false }) {
@@ -175,7 +173,7 @@ async function buildManual() {
   const flow = [
     ["모으기", "구글 뉴스·전문지 RSS에서 키워드로", "LuSearch"],
     ["거르기", "제목 확인·제외 매체·행사·이미 보고", "LuFilter"],
-    ["점수·분류", "공단·사업어·리스크로 점수", "LuGauge"],
+    ["점수", "공단·사업어·리스크로 점수, 분류 추정", "LuGauge"],
     ["추천 ★", "리스크 먼저, 분류 고루 5건", "LuStar"],
     ["보고서", "메일에 붙일 제목·본문 복사", "LuMail"],
     ["기록", "보낸 기사는 다음 조회에서 빠짐", "LuHistory"],
@@ -238,7 +236,7 @@ async function buildManual() {
   s = pres.addSlide({ sectionTitle: "02 베이직" });
   header(s, { no: "02", part: "navy", kicker: "베이직 · ② 추천 확인", title: "② ★추천 확인하고 순서 정하기",
     sub: "추천 5건이 미리 선택됩니다. 더하고 빼고, 끌어서 순서를 정하면 그 순서대로 보고서에 실립니다" });
-  shot(s, "03_basic_result", SHOT, [["check", 1], ["col_no", 2], ["row_selected", 3], ["updown", 4], ["reset", 5], ["addlink", 6]]);
+  shot(s, "03_basic_result", SHOT, [["check", 1], ["col_no", 2], ["row_selected", 3, "r"], ["updown", 4], ["reset", 5], ["addlink", 6]]);
   explain(s, [
     [1, "선택 칸", "☑ 누르면 넣고 빼기. ★는 앱 추천"],
     [2, "순번", "조회 때 매긴 고정 번호(정렬해도 그대로)"],
@@ -246,7 +244,7 @@ async function buildManual() {
     [4, "▲ ▼", "줄을 누른 뒤 한 칸씩 이동(Ctrl+↑↓)"],
     [5, "추천으로 되돌리기", "고친 선택을 처음 추천대로"],
     [6, "기사 링크로 추가", "검색에 없는 기사를 주소로 넣기"],
-  ], { ...RIGHT, gap: 0.08 });
+  ], { ...RIGHT, gap: 6 });
   s.addNotes("추천 확인. 줄 바탕색: 연한 주황 = 공단(A) 기사, 연한 청록 = 직접 추가. 기사 제목을 더블클릭하면 원문이 열립니다. 끌어 놓기는 체크 칸이 아닌 곳을 잡고 끕니다.");
 
   s = pres.addSlide({ sectionTitle: "02 베이직" });
@@ -302,7 +300,7 @@ async function buildManual() {
     [4, "순서", "선택 항목 맨 위로, ▲▼, 끌어 놓기"],
     [5, "등급·점수·분류", "머리글을 누르면 그 열로 정렬"],
     [6, "①~④ 단계", "AI 선별 → 보고서 → 기록"],
-  ], { ...RIGHT, gap: 0.08 });
+  ], { ...RIGHT, gap: 6 });
   s.addNotes("프로 탭. 처음에는 후보 전체가 선택된 채로 나옵니다. 베이직과 같은 기사를 보지만 선택은 따로입니다.");
 
   s = pres.addSlide({ sectionTitle: "03 프로" });
@@ -378,7 +376,7 @@ async function buildManual() {
     [4, "환류 버튼", "개선 요청문 복사 · Claude 답변 붙여넣기"],
     [5, "규칙 파일", "내보내기·불러오기(다른 PC와 공유)·기본값으로"],
     [6, "규칙 저장", "저장하면 변경 이력에 남음"],
-  ], { ...RIGHT, gap: 0.08 });
+  ], { ...RIGHT, gap: 6 });
   s.addNotes("키워드 쓰는 법: 한 줄에 하나. 띄어 쓴 말은 같은 순서로 20자 안에 있으면 맞음(공동주택 관리비). 같은 뜻은 OR로 한 줄에(승강기 OR 엘리베이터). -말은 빼기(임대주택 -민간임대). \"따옴표\"는 문구 그대로.");
 
   s = pres.addSlide({ sectionTitle: "04 선정 규칙" });

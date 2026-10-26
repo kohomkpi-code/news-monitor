@@ -217,15 +217,15 @@ try:
         def bb(sel):
             r = page.locator(sel).first.bounding_box()
             return [round(r["x"]), round(r["y"]), round(r["width"]), round(r["height"])]
-        marks = {"subject_copy": bb("text=제목 복사"), "body1": bb("#body-simple")}
+        marks = {"subject_copy": bb('button:has-text("제목 복사")'), "body1": bb("#body-simple")}
         try:
             marks["body2"] = bb("#body-full")
         except Exception:
             pass
-        copies = page.locator("text=본문 복사")
-        if copies.count():
-            r = copies.first.bounding_box()
-            marks["body1_copy"] = [round(r["x"]), round(r["y"]), round(r["width"]), round(r["height"])]
+        copies = page.locator('button:has-text("본문 복사")')
+        for i, key in enumerate(("body1_copy", "body2_copy")[:copies.count()]):
+            r = copies.nth(i).bounding_box()
+            marks[key] = [round(r["x"]), round(r["y"]), round(r["width"]), round(r["height"])]
         page.screenshot(path=os.path.join(OUT, "04_report.png"), full_page=False)
         GEO["04_report"] = {"size": [1100, 900], "marks": marks}
         print("찍음: 04_report", list(marks))
