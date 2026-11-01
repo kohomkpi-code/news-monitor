@@ -41,6 +41,7 @@ import export
 import feeds
 import google_news
 import history
+import history_share
 import mail_import
 import naver_api
 import ranking
@@ -110,9 +111,11 @@ class App(tk.Tk):
         self.last_search: dict | None = None  # 마지막 조회의 조건·빠진 기사 (결과 내려받기용)
         self.step = 1               # 베이직 단계: 1 조회 → 2 추천 확인 → 3 보고서 → 4 기록 → 5 끝
         self.tab = "basic"
+        self.share_result: history_share.SyncResult | None = None  # 보고 기록 공유: 마지막으로 맞춘 결과
 
         self._build_ui()
         self._load_config_into_ui()
+        self.after(300, self._sync_history)  # 켜자마자 공유 폴더의 최신 보고 기록을 받아 온다
         self.after(1500, self._check_update_silently)
 
     # ================================================================== 큰 틀
@@ -518,7 +521,7 @@ class App(tk.Tk):
         hline(left).grid(row=1, column=0, columnspan=2, sticky="ew")
         lf = tk.Frame(left, bg=PANEL)
         lf.grid(row=2, column=0, columnspan=2, sticky="ew")
-        ttk.Button(lf, text="↻ 새로고침", style="Small.TButton", command=self._refresh_history).pack(side="left", padx=16, pady=10)
+        ttk.Button(lf, text="↻ 새로고침", style="Small.TButton", command=self._refresh_history_btn).pack(side="left", padx=16, pady=10)
 
         right = panel(page)
         right.grid(row=1, column=1, sticky="nsew")
@@ -642,6 +645,58 @@ class App(tk.Tk):
         n = history.remove(links)
         self._refresh_history()
         self._set_status(f"보고 기록 {n}건을 취소했습니다.", word="보고 기록")
+        self._sync_history(quiet=True)
+
+    # -------------------------------------------------------- 보고 기록 공유 (구글 드라이브 등)
+    def _share_on(self) -> bool:
+        return bool(str(self.cfg.get("share_dir", "")).strip())
+
+    def _share_pc(self) -> str:
+        return str(self.cfg.get("share_pc", "")).strip() or history_share.default_pc_name()
+
+    def _refresh_history_btn(self):
+        if self._share_on():
+            self._sync_history()
+        else:
+            self._refresh_history()
+
+    def _sync_history(self, quiet: bool = False):
+        """공유 폴더와 보고 기록 맞추기(별도 스레드). quiet: 잘 됐고 바뀐 게 없으면 상태줄을 그대로 둔다."""
+        if not self._share_on():
+            return
+        folder, pc = self.cfg["share_dir"], self._share_pc()
+
+        def done(r: history_share.SyncResult):
+            self.share_result = r
+            self._update_share_info()
+            self._refresh_history()
+            if self.searching or (quiet and r.ok and not (r.received or r.cancelled)):
+                return
+            kind = "ok" if r.ok else ("info" if quiet else "error")
+            self._set_status(history_share.describe(r), word="보고 기록 공유", kind=kind)
+
+        def work():
+            r = history_share.sync(folder, pc)
+            self.after(0, done, r)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_share_info(self):
+        r = self.share_result
+        if not self._share_on():
+            text = "꺼짐 — 이 PC 기록만 씁니다."
+        elif r is None:
+            text = "아직 맞추지 않았습니다."
+        elif r.ok:
+            text = f"마지막으로 맞춘 때 {r.at} · PC {r.pcs}대 · 기록 {r.total}건"
+        else:
+            text = r.message
+        self.share_info.configure(text=text)
+
+    def _pick_share_dir(self):
+        path = filedialog.askdirectory(parent=self, title="보고 기록을 함께 쓸 폴더 고르기 (구글 드라이브 안의 폴더)")
+        if path:
+            self.setting_vars["share_dir"].set(os.path.normpath(path))
 
     # ================================================================== 설정
     def _build_settings(self, page):
@@ -706,6 +761,32 @@ class App(tk.Tk):
                 v.trace_add("write", lambda *a: self._update_subject_preview())
         hline(left).pack(fill="x")
 
+        box, _ = section("보고 기록 공유 (구글 드라이브)",
+                         "담당자가 없어도 다른 PC에서 같은 보고 기록을 씁니다. 구글 드라이브(데스크톱용) 안의 함께 쓰는 폴더를\n"
+                         "고르세요(사내 공유 폴더도 됨). 앱을 켤 때·조회할 때·기록할 때 자동으로 맞춥니다. 비우면 꺼집니다.")
+        r = tk.Frame(box, bg=PANEL)
+        r.pack(fill="x", pady=2)
+        ttk.Label(r, text="공유 폴더", style="Panel.TLabel", width=14).pack(side="left")
+        v = tk.StringVar()
+        self.setting_vars["share_dir"] = v
+        ttk.Entry(r, textvariable=v, width=36).pack(side="left")
+        ttk.Button(r, text="폴더 고르기…", style="Small.TButton", command=self._pick_share_dir).pack(side="left", padx=(6, 0))
+        r = tk.Frame(box, bg=PANEL)
+        r.pack(fill="x", pady=2)
+        ttk.Label(r, text="이 PC 이름", style="Panel.TLabel", width=14).pack(side="left")
+        v = tk.StringVar()
+        self.setting_vars["share_pc"] = v
+        ttk.Entry(r, textvariable=v, width=20).pack(side="left")
+        ttk.Label(r, text=f"비우면 '{history_share.default_pc_name()}' · 공유 폴더 파일 이름에 씀",
+                  style="PanelDesc.TLabel").pack(side="left", padx=(8, 0))
+        r = tk.Frame(box, bg=PANEL)
+        r.pack(fill="x", pady=(4, 0))
+        ttk.Button(r, text="저장하고 지금 맞추기", style="Small.TButton",
+                   command=lambda: (self._save_settings(), self._sync_history())).pack(side="left")
+        self.share_info = ttk.Label(r, text="", style="PanelDesc.TLabel")
+        self.share_info.pack(side="left", padx=(10, 0))
+        hline(left).pack(fill="x")
+
         box, _ = section("선정 규칙", "키워드·제외어·행사 단어·점수·추천 기준은 [선정 규칙] 탭에서 보고 고칩니다.\n"
                                    "앱을 업데이트하지 않아도 다음 조회부터 바로 적용됩니다.")
         ttk.Button(box, text="선정 규칙 열기 ›", style="Link.TButton",
@@ -734,7 +815,7 @@ class App(tk.Tk):
 
         foot = tk.Frame(page, bg=BG)
         foot.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        tk.Label(foot, text="모든 값은 이 PC의 config.json에만 저장됩니다.", bg=BG, fg=DESC, font=self.F.desc).pack(side="left")
+        tk.Label(foot, text="모든 값은 이 PC의 config.json에만 저장됩니다(보고 기록 공유를 켜면 보고 기록만 그 폴더에 올라감).", bg=BG, fg=DESC, font=self.F.desc).pack(side="left")
         ttk.Button(foot, text="설정 저장", width=14, style="PrimaryBig.TButton", command=self._save_settings).pack(side="right")
 
     # ================================================================== 선정 규칙
@@ -1219,6 +1300,7 @@ class App(tk.Tk):
         self._on_source_change()
         self._update_list_counts()
         self._update_feeds_summary()
+        self._update_share_info()
         self._load_rules_into_ui()
         self._update_steps()
         self._on_selection_change()
@@ -1241,6 +1323,7 @@ class App(tk.Tk):
         self.cfg["holidays"] = self._lines(self.holiday_text)
         config.save(self.cfg)
         self._set_auto_period()
+        self._update_share_info()
         self._set_status("설정을 저장했습니다.", word="설정")
 
     @staticmethod
@@ -1540,6 +1623,11 @@ class App(tk.Tk):
                              float(self.cfg.get("similar_threshold", 0.85)), list(grades))
         sent_skipped = 0
         if self.cfg.get("exclude_sent", True):
+            if self._share_on():  # 다른 PC 가 방금 보고한 기사도 빼도록 공유 폴더와 먼저 맞춘다
+                self.after(0, self._set_status, "보고 기록 공유 폴더와 맞추는 중…", "조회 중", "busy")
+                r = history_share.sync(self.cfg["share_dir"], self._share_pc())
+                self.after(0, lambda: (setattr(self, "share_result", r), self._update_share_info(),
+                                       self._refresh_history()))
             sent = history.load()
             titles = history.sent_titles(sent, dedup.normalize)
             before = len(found)
@@ -1863,6 +1951,7 @@ class App(tk.Tk):
             self._set_status(f"지난 보고 메일 {files}개에서 {added}건 불러옴"
                              + (f" · 이미 있던 {skipped}건 건너뜀" if skipped else "")
                              + (f" · 날짜·기사를 못 찾은 파일 {left}개 제외" if left else ""), word="불러오기 완료")
+            self._sync_history(quiet=True)
 
         win, body, _ = self._dialog(
             "지난 보고 메일 불러오기",
@@ -1972,8 +2061,9 @@ class App(tk.Tk):
         self._refresh_history(select_day=now.date().isoformat())
         if table is self.basic:
             self._set_step(5)
-        self._set_status(f"{n}건을 기록했습니다. 다음 조회부터 빠지고, [보고 기록] 탭에서 날짜별로 볼 수 있습니다.",
-                         word="기록 완료")
+        self._set_status(f"{n}건을 기록했습니다. 다음 조회부터 빠지고, [보고 기록] 탭에서 날짜별로 볼 수 있습니다."
+                         + (" 공유 폴더에도 올립니다." if self._share_on() else ""), word="기록 완료")
+        self._sync_history(quiet=True)
 
     # -------------------------------------------------------- 업데이트
     def _check_update_silently(self):

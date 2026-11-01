@@ -56,6 +56,12 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python tests/check_rules.py
 
+      - name: 보고 기록 공유 시험 (두 PC·취소·충돌 사본, 실패하면 배포 중단)
+        if: steps.ver.outputs.exists == 'false'
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python tests/check_history.py
+
       - name: exe 만들기
         if: steps.ver.outputs.exists == 'false'
         run: pyinstaller --onefile --windowed --name NewsMonitor --add-data "assets/fonts;assets/fonts" app.py
