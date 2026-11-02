@@ -114,11 +114,16 @@ class App(tk.Tk):
         self.step = 1               # 베이직 단계: 1 조회 → 2 추천 확인 → 3 보고서 → 4 기록 → 5 끝
         self.tab = "basic"
         self.share_result: history_share.SyncResult | None = None  # 보고 기록 공유: 마지막으로 맞춘 결과
+        self.sync_idle = threading.Event()  # 맞추는 중이 아니면 켜짐 — 앱을 닫을 때 올리기가 끝나길 기다린다
+        self.sync_idle.set()
+        self.pending_report: ResultTable | None = None  # 보고서를 열고 아직 '보고 완료로 기록'을 안 한 표
+        self._report_table: ResultTable | None = None   # 마지막으로 보고서를 연 표
 
         self._build_ui()
         self._load_config_into_ui()
         self.after(300, self._sync_history)  # 켜자마자 공유 폴더의 최신 보고 기록을 받아 온다
         self.after(1500, self._check_update_silently)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ================================================================== 큰 틀
     def _build_ui(self):
@@ -168,6 +173,15 @@ class App(tk.Tk):
         tk.Button(upd_wrap, text="업데이트 확인", command=self._check_update, bg=NAVY, fg="#E6ECF2",
                   activebackground=NAVY_HOVER, activeforeground="#FFFFFF", relief="flat", bd=0,
                   font=self.F.small, padx=12, pady=4, cursor="hand2").pack(padx=1, pady=1)
+        # 보고 기록 공유 상태(누르면 [설정] 탭)
+        badge = tk.Frame(bar, bg=NAVY, cursor="hand2")
+        badge.pack(side="right")
+        self.share_dot = tk.Label(badge, text="●", bg=NAVY, fg=TAB_OFF, font=self.F.small)
+        self.share_dot.pack(side="left")
+        self.share_badge = tk.Label(badge, text="", bg=NAVY, fg=STATUS_TEXT, font=self.F.small)
+        self.share_badge.pack(side="left", padx=(4, 0))
+        for w in (badge, self.share_dot, self.share_badge):
+            w.bind("<Button-1>", lambda e: self._select_tab("settings"))
 
     def _hover_tab(self, name: str, on: bool):
         if name == self.tab:
@@ -691,22 +705,53 @@ class App(tk.Tk):
             self._set_status(history_share.describe(r), word="보고 기록 공유", kind=kind)
 
         def work():
-            r = self._share_sync()
-            self.after(0, done, r)
+            try:
+                r = self._share_sync()
+            finally:
+                self.sync_idle.set()
+            try:
+                self.after(0, done, r)
+            except RuntimeError:  # 그사이 창을 닫음 — 올리기는 끝났다
+                pass
 
+        self.sync_idle.clear()
+        self._update_share_info(busy=True)
         threading.Thread(target=work, daemon=True).start()
 
-    def _update_share_info(self):
+    def _update_share_info(self, busy: bool = False):
         r = self.share_result
         if not self._share_on():
-            text = "꺼짐 — 이 PC 기록만 씁니다."
+            text, badge, dot = "꺼짐 — 이 PC 기록만 씁니다.", "기록 공유 꺼짐", TAB_OFF
+        elif busy:
+            text, badge, dot = "맞추는 중…", "기록 공유 맞추는 중", AMBER
         elif r is None:
-            text = "아직 맞추지 않았습니다."
+            text, badge, dot = "아직 맞추지 않았습니다.", "기록 공유", TAB_OFF
         elif r.ok:
             text = f"마지막으로 맞춘 때 {r.at} · PC {r.pcs}대 · 기록 {r.total}건"
+            badge, dot = f"기록 공유 {r.at[-5:]}", theme.DOT_OK
         else:
-            text = r.message
+            text, badge, dot = r.message, "기록 공유 안 됨", "#FF9C8C"
         self.share_info.configure(text=text)
+        self.share_badge.configure(text=badge)
+        self.share_dot.configure(fg=dot)
+
+    def _on_close(self):
+        """닫기 전에: 보고서를 열고 기록을 안 했으면 물어보고, 보고 기록 올리기가 끝나길 기다린다."""
+        t = self.pending_report
+        if t is not None and t.selected():
+            ans = messagebox.askyesnocancel(
+                "보고 완료 기록", "보고서를 열었지만 아직 [④ 보고 완료로 기록]을 하지 않았습니다.\n\n"
+                "보고 메일을 보냈다면 [예]를 눌러 기록하고 닫으세요.\n"
+                "[아니오] 기록하지 않고 닫기 · [취소] 돌아가기")
+            if ans is None:
+                return
+            if ans:
+                self._mark_sent(t, ask=False)
+        if not self.sync_idle.is_set():
+            self._set_status("다른 PC 와 함께 쓰도록 보고 기록을 올리는 중… 잠시만 기다리세요.", word="닫는 중", kind="busy")
+            self.update()
+            self.sync_idle.wait(60)
+        self.destroy()
 
     def _on_share_mode_change(self):
         mode = self.share_mode_var.get()
@@ -1599,6 +1644,7 @@ class App(tk.Tk):
             return
 
         self.searching = True
+        self.pending_report = None  # 새로 조회하면 이전 보고서 기록 알림은 없앤다
         self.cancel_search.clear()
         self._search_buttons(busy=True)
         self._clear_results()
@@ -2114,6 +2160,7 @@ class App(tk.Tk):
         if not selected:
             messagebox.showinfo("보고서", "포함할 기사가 없습니다. 먼저 조회하고 ☑ 를 확인하세요.")
             return
+        self._report_table = table
         threading.Thread(target=self._report_worker, args=(selected, keep_order), daemon=True).start()
 
     def _report_worker(self, selected: list[Article], keep_order: bool):
@@ -2137,17 +2184,18 @@ class App(tk.Tk):
         path = report.save_report(body, subject=subject, simple_html=simple, day=dt.date.today(),
                                   count=len(report_items))
         webbrowser.open("file:///" + path.replace("\\", "/"))
+        self.pending_report = self._report_table
         if self.step < 4:
             self._set_step(4)
         self._set_status("브라우저에서 [제목 복사]·[본문 복사] → 그룹웨어 편지쓰기에 붙여넣기 → 보낸 뒤 [④ 보고 완료로 기록]"
                          + (f" (원문 주소 못 찾은 {failed}건은 구글 경유)" if failed else ""), word="보고서 열림")
 
-    def _mark_sent(self, table: ResultTable):
+    def _mark_sent(self, table: ResultTable, ask: bool = True):
         selected = table.selected()
         if not selected:
             messagebox.showinfo("기록", "기록할 기사가 없습니다.")
             return
-        if not messagebox.askyesno("보고 완료", f"선택된 {len(selected)}건을 보고 완료로 기록할까요?\n"
+        if ask and not messagebox.askyesno("보고 완료", f"선택된 {len(selected)}건을 보고 완료로 기록할까요?\n"
                                    "다음 조회부터 '이미 보고한 기사 제외'로 걸러집니다."):
             return
         entries = []
@@ -2159,6 +2207,7 @@ class App(tk.Tk):
                 entries.append({"link": link, "title": title, "source": src, "main": main})
         now = dt.datetime.now(KST)
         n = history.mark_sent(entries, when=now)
+        self.pending_report = None
         self._refresh_history(select_day=now.date().isoformat())
         if table is self.basic:
             self._set_step(5)
