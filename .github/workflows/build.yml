@@ -56,7 +56,7 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python tests/check_rules.py
 
-      - name: 보고 기록 공유 시험 (두 PC·취소·충돌 사본, 실패하면 배포 중단)
+      - name: 보고 기록 공유 시험 (공유 폴더·중계함 왕복, 실패하면 배포 중단)
         if: steps.ver.outputs.exists == 'false'
         env:
           PYTHONIOENCODING: utf-8

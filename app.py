@@ -19,6 +19,7 @@ import dataclasses
 import datetime as dt
 import json
 import os
+import secrets
 import threading
 import tkinter as tk
 import webbrowser
@@ -42,6 +43,7 @@ import feeds
 import google_news
 import history
 import history_share
+import relay_script
 import mail_import
 import naver_api
 import ranking
@@ -647,9 +649,23 @@ class App(tk.Tk):
         self._set_status(f"보고 기록 {n}건을 취소했습니다.", word="보고 기록")
         self._sync_history(quiet=True)
 
-    # -------------------------------------------------------- 보고 기록 공유 (구글 드라이브 등)
+    # -------------------------------------------------------- 보고 기록 공유 (중계함 · 공유 폴더)
+    def _share_mode(self) -> str:
+        """off | relay(중계함, 앱만 있으면 됨) | folder(구글 드라이브 등 공유 폴더). v1.1.0 설정은 폴더가 있으면 folder."""
+        mode = self.cfg.get("share_mode", "")
+        if mode in ("off", "relay", "folder"):
+            return mode
+        return "folder" if str(self.cfg.get("share_dir", "")).strip() else "off"
+
     def _share_on(self) -> bool:
-        return bool(str(self.cfg.get("share_dir", "")).strip())
+        return self._share_mode() != "off"
+
+    def _share_sync(self) -> history_share.SyncResult:
+        """지금 설정으로 한 번 맞춘다(별도 스레드나 조회 작업 안에서 부른다)."""
+        if self._share_mode() == "relay":
+            return history_share.sync_relay(self.cfg.get("share_url", ""), self.cfg.get("share_key", ""),
+                                            self._share_pc())
+        return history_share.sync(self.cfg.get("share_dir", ""), self._share_pc())
 
     def _share_pc(self) -> str:
         return str(self.cfg.get("share_pc", "")).strip() or history_share.default_pc_name()
@@ -664,7 +680,6 @@ class App(tk.Tk):
         """공유 폴더와 보고 기록 맞추기(별도 스레드). quiet: 잘 됐고 바뀐 게 없으면 상태줄을 그대로 둔다."""
         if not self._share_on():
             return
-        folder, pc = self.cfg["share_dir"], self._share_pc()
 
         def done(r: history_share.SyncResult):
             self.share_result = r
@@ -676,7 +691,7 @@ class App(tk.Tk):
             self._set_status(history_share.describe(r), word="보고 기록 공유", kind=kind)
 
         def work():
-            r = history_share.sync(folder, pc)
+            r = self._share_sync()
             self.after(0, done, r)
 
         threading.Thread(target=work, daemon=True).start()
@@ -692,6 +707,52 @@ class App(tk.Tk):
         else:
             text = r.message
         self.share_info.configure(text=text)
+
+    def _on_share_mode_change(self):
+        mode = self.share_mode_var.get()
+        for e in self.share_relay_widgets:
+            e.state(["!disabled"] if mode == "relay" else ["disabled"])
+        for e in self.share_folder_widgets:
+            e.state(["!disabled"] if mode == "folder" else ["disabled"])
+
+    def _copy_relay_script(self):
+        """중계함 대본을 복사한다. 암호가 비었으면 새로 만들어 칸에 넣는다(영문·숫자 20자)."""
+        key = self.setting_vars["share_key"].get().strip()
+        if not key:
+            key = secrets.token_hex(10)
+            self.setting_vars["share_key"].set(key)
+        self.clipboard_clear()
+        self.clipboard_append(relay_script.build(key))
+        self.share_mode_var.set("relay")
+        self._on_share_mode_change()
+        self._set_status("중계함 대본을 복사했습니다(암호 포함). 부서 계정의 script.google.com 새 프로젝트에 붙여 넣고 "
+                         "웹 앱으로 배포한 뒤, 나온 주소를 '중계함 주소'에 넣고 [저장하고 지금 맞추기].", word="중계함")
+
+    def _copy_relay_code(self):
+        url, key = self.setting_vars["share_url"].get().strip(), self.setting_vars["share_key"].get().strip()
+        if not url or not key:
+            messagebox.showinfo("연결 코드", "중계함 주소와 암호를 먼저 넣으세요.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(f"{url}#{key}")
+        self._set_status("연결 코드(주소#암호)를 복사했습니다. 다른 PC 의 [설정] → [연결 코드 붙여넣기]로 옮기세요. "
+                         "암호가 들어 있으니 함께 쓰는 직원에게만 전하세요.", word="중계함")
+
+    def _paste_relay_code(self):
+        try:
+            text = self.clipboard_get()
+        except tk.TclError:
+            text = ""
+        got = history_share.parse_code(text)
+        if not got:
+            messagebox.showinfo("연결 코드", "복사해 둔 연결 코드가 없습니다.\n"
+                                "담당자 PC 의 [연결 코드 복사]로 받은 'https://…#암호'를 복사한 뒤 다시 누르세요.")
+            return
+        self.setting_vars["share_url"].set(got[0])
+        self.setting_vars["share_key"].set(got[1])
+        self.share_mode_var.set("relay")
+        self._on_share_mode_change()
+        self._set_status("연결 코드를 넣었습니다. [저장하고 지금 맞추기]를 누르세요.", word="중계함")
 
     def _pick_share_dir(self):
         path = filedialog.askdirectory(parent=self, title="보고 기록을 함께 쓸 폴더 고르기 (구글 드라이브 안의 폴더)")
@@ -761,23 +822,60 @@ class App(tk.Tk):
                 v.trace_add("write", lambda *a: self._update_subject_preview())
         hline(left).pack(fill="x")
 
-        box, _ = section("보고 기록 공유 (구글 드라이브)",
-                         "담당자가 없어도 다른 PC에서 같은 보고 기록을 씁니다. 구글 드라이브(데스크톱용) 안의 함께 쓰는 폴더를\n"
-                         "고르세요(사내 공유 폴더도 됨). 앱을 켤 때·조회할 때·기록할 때 자동으로 맞춥니다. 비우면 꺼집니다.")
+        box, _ = section("보고 기록 공유",
+                         "담당자가 없어도 다른 PC에서 같은 보고 기록을 씁니다. 앱을 켤 때·조회할 때·기록할 때 자동으로 맞춥니다.\n"
+                         "중계함: 부서 계정에 한 번 만들어 두면 각 PC는 앱만 있으면 됨 · 공유 폴더: PC마다 구글 드라이브 설치 필요")
+        self.share_mode_var = tk.StringVar()
+        r = tk.Frame(box, bg=PANEL)
+        r.pack(fill="x", pady=(0, 4))
+        ttk.Label(r, text="공유 방식", style="Panel.TLabel", width=14).pack(side="left")
+        for text, value in (("끔", "off"), ("중계함 (앱만 있으면 됨)", "relay"), ("공유 폴더", "folder")):
+            ttk.Radiobutton(r, text=text, value=value, variable=self.share_mode_var,
+                            command=self._on_share_mode_change).pack(side="left", padx=(0, 18))
+        self.share_relay_widgets, self.share_folder_widgets = [], []
+        r = tk.Frame(box, bg=PANEL)
+        r.pack(fill="x", pady=2)
+        ttk.Label(r, text="중계함 주소", style="Panel.TLabel", width=14).pack(side="left")
+        v = tk.StringVar()
+        self.setting_vars["share_url"] = v
+        e = ttk.Entry(r, textvariable=v, width=36)
+        e.pack(side="left")
+        self.share_relay_widgets.append(e)
+        r = tk.Frame(box, bg=PANEL)
+        r.pack(fill="x", pady=2)
+        ttk.Label(r, text="중계함 암호", style="Panel.TLabel", width=14).pack(side="left")
+        v = tk.StringVar()
+        self.setting_vars["share_key"] = v
+        e = ttk.Entry(r, textvariable=v, width=22, show="*")
+        e.pack(side="left")
+        self.share_relay_widgets.append(e)
+        ttk.Button(r, text="중계함 대본 복사", style="Small.TButton",
+                   command=self._copy_relay_script).pack(side="left", padx=(6, 0))
+        r = tk.Frame(box, bg=PANEL)
+        r.pack(fill="x", pady=2)
+        ttk.Label(r, text="", style="Panel.TLabel", width=14).pack(side="left")
+        for text, cmd in (("연결 코드 복사", self._copy_relay_code), ("연결 코드 붙여넣기", self._paste_relay_code)):
+            b = ttk.Button(r, text=text, style="Small.TButton", command=cmd)
+            b.pack(side="left", padx=(0, 6))
+            self.share_relay_widgets.append(b)
+        ttk.Label(r, text="다른 PC로 주소·암호 옮기기", style="PanelDesc.TLabel").pack(side="left", padx=(2, 0))
         r = tk.Frame(box, bg=PANEL)
         r.pack(fill="x", pady=2)
         ttk.Label(r, text="공유 폴더", style="Panel.TLabel", width=14).pack(side="left")
         v = tk.StringVar()
         self.setting_vars["share_dir"] = v
-        ttk.Entry(r, textvariable=v, width=36).pack(side="left")
-        ttk.Button(r, text="폴더 고르기…", style="Small.TButton", command=self._pick_share_dir).pack(side="left", padx=(6, 0))
+        e = ttk.Entry(r, textvariable=v, width=36)
+        e.pack(side="left")
+        b = ttk.Button(r, text="폴더 고르기…", style="Small.TButton", command=self._pick_share_dir)
+        b.pack(side="left", padx=(6, 0))
+        self.share_folder_widgets += [e, b]
         r = tk.Frame(box, bg=PANEL)
         r.pack(fill="x", pady=2)
         ttk.Label(r, text="이 PC 이름", style="Panel.TLabel", width=14).pack(side="left")
         v = tk.StringVar()
         self.setting_vars["share_pc"] = v
         ttk.Entry(r, textvariable=v, width=20).pack(side="left")
-        ttk.Label(r, text=f"비우면 '{history_share.default_pc_name()}' · 공유 폴더 파일 이름에 씀",
+        ttk.Label(r, text=f"비우면 '{history_share.default_pc_name()}' · 기록 파일 이름에 씀",
                   style="PanelDesc.TLabel").pack(side="left", padx=(8, 0))
         r = tk.Frame(box, bg=PANEL)
         r.pack(fill="x", pady=(4, 0))
@@ -815,7 +913,7 @@ class App(tk.Tk):
 
         foot = tk.Frame(page, bg=BG)
         foot.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        tk.Label(foot, text="모든 값은 이 PC의 config.json에만 저장됩니다(보고 기록 공유를 켜면 보고 기록만 그 폴더에 올라감).", bg=BG, fg=DESC, font=self.F.desc).pack(side="left")
+        tk.Label(foot, text="모든 값은 이 PC의 config.json에만 저장됩니다(보고 기록 공유를 켜면 보고 기록만 함께 쓰는 곳에 올라감).", bg=BG, fg=DESC, font=self.F.desc).pack(side="left")
         ttk.Button(foot, text="설정 저장", width=14, style="PrimaryBig.TButton", command=self._save_settings).pack(side="right")
 
     # ================================================================== 선정 규칙
@@ -1300,6 +1398,8 @@ class App(tk.Tk):
         self._on_source_change()
         self._update_list_counts()
         self._update_feeds_summary()
+        self.share_mode_var.set(self._share_mode())
+        self._on_share_mode_change()
         self._update_share_info()
         self._load_rules_into_ui()
         self._update_steps()
@@ -1321,6 +1421,7 @@ class App(tk.Tk):
         for key, v in self.setting_vars.items():
             self.cfg[key] = v.get().strip()
         self.cfg["holidays"] = self._lines(self.holiday_text)
+        self.cfg["share_mode"] = self.share_mode_var.get()
         config.save(self.cfg)
         self._set_auto_period()
         self._update_share_info()
@@ -1623,9 +1724,9 @@ class App(tk.Tk):
                              float(self.cfg.get("similar_threshold", 0.85)), list(grades))
         sent_skipped = 0
         if self.cfg.get("exclude_sent", True):
-            if self._share_on():  # 다른 PC 가 방금 보고한 기사도 빼도록 공유 폴더와 먼저 맞춘다
-                self.after(0, self._set_status, "보고 기록 공유 폴더와 맞추는 중…", "조회 중", "busy")
-                r = history_share.sync(self.cfg["share_dir"], self._share_pc())
+            if self._share_on():  # 다른 PC 가 방금 보고한 기사도 빼도록 공유 기록과 먼저 맞춘다
+                self.after(0, self._set_status, "다른 PC 의 보고 기록과 맞추는 중…", "조회 중", "busy")
+                r = self._share_sync()
                 self.after(0, lambda: (setattr(self, "share_result", r), self._update_share_info(),
                                        self._refresh_history()))
             sent = history.load()
@@ -2062,7 +2163,7 @@ class App(tk.Tk):
         if table is self.basic:
             self._set_step(5)
         self._set_status(f"{n}건을 기록했습니다. 다음 조회부터 빠지고, [보고 기록] 탭에서 날짜별로 볼 수 있습니다."
-                         + (" 공유 폴더에도 올립니다." if self._share_on() else ""), word="기록 완료")
+                         + (" 다른 PC 와 함께 쓰도록 올립니다." if self._share_on() else ""), word="기록 완료")
         self._sync_history(quiet=True)
 
     # -------------------------------------------------------- 업데이트

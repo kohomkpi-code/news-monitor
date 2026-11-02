@@ -7,7 +7,7 @@
   rules_log: 규칙을 바꾼 이력(언제, 어떻게, 무엇을). "keywords" 는 검색 키워드 전체(A→S→B, 자동).
 - v1.0.0 에서 예전 키워드(keywords_a/b)·제외어·행사 단어·추천 건수를 rules 로 옮겼다.
   키워드는 새 3단 기본값으로 바꾸고, 예전 A·B 목록은 keywords_backup_v2 에 남겨 둔다.
-- share_dir / share_pc: 보고 기록 공유 폴더와 이 PC 이름(v1.1.0, history_share.py).
+- share_mode / share_url / share_key / share_dir / share_pc: 보고 기록 공유(v1.1.0 공유 폴더, v1.2.0 중계함, history_share.py).
 - extra_feeds: 추가 RSS 매체 [{"name", "url", "on"}]. [설정] 탭 → [전문지 고르기]에서 고친다.
 """
 
@@ -44,7 +44,10 @@ DEFAULT_CONFIG = {
     "similar_threshold": 0.85, # 유사 제목 판정 기준 (0~1)
     "report_title": "언론보도 모니터링(임원용)",
     "mail_subject": "({날짜})언론보도",  # {날짜} → 261015 (보고서를 연 날)
-    "share_dir": "",           # 보고 기록 공유 폴더(구글 드라이브 등). 비우면 이 PC 기록만(history_share.py)
+    "share_mode": "",          # 보고 기록 공유: off | relay(중계함) | folder(공유 폴더). 빈칸 = v1.1.0 설정(폴더 있으면 folder)
+    "share_url": "",           # 중계함(Apps Script 웹 앱) 주소
+    "share_key": "",           # 중계함 암호 — 이 PC config.json 에만(엑셀·규칙 파일에 넣지 않음)
+    "share_dir": "",           # 보고 기록 공유 폴더(구글 드라이브 등)(history_share.py)
     "share_pc": "",            # 공유 폴더 파일 이름에 쓸 이 PC 이름. 비우면 컴퓨터 이름
 }
 
