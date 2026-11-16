@@ -1,6 +1,6 @@
 # KOHOM 뉴스룸 설계 문서 (텍스트판)
 
-- 대상: KOHOM 뉴스룸 v1.2.0 · 작성 2026. 10. 26. · 고침 2026. 11. 2. · 주택관리공단 전략과
+- 대상: KOHOM 뉴스룸 v1.3.0 · 작성 2026. 10. 26. · 고침 2026. 11. 16. · 주택관리공단 전략과
 - 용도: Claude Design 등 디자인 도구에 화면 재설계·매뉴얼 개선의 바탕 자료로 올리는 문서. 그림 없이 화면 구성·글자·동작·규칙·색을 모두 글로 적었다.
 - 화면 글자는 앱 그대로 `[버튼]`, 「입력칸·표 머리글」로 적었다. 재설계해도 매뉴얼이 가리키는 버튼 이름은 바꾸지 않는다(16장).
 - 사용법은 `KOHOM뉴스룸_사용자매뉴얼_텍스트.md`에 따로 있다.
@@ -73,7 +73,7 @@ AI 선별(선택): 프로 [① AI 선별 요청문 복사] → Claude(판단 기
 ## 4. 공통 틀
 
 ### 4-1. 창
-- 제목줄: `KOHOM 뉴스룸 v1.2.0` · 최소 크기 980×640 · 바탕 연회색(BG).
+- 제목줄: `KOHOM 뉴스룸 v1.3.0` · 최소 크기 980×640 · 바탕 연회색(BG).
 - 머리띠(네이비 바탕): 왼쪽 앱 이름·버전, 가운데 탭 5개(켜진 탭은 흰 글자·SemiBold, 꺼진 탭은 회청색), 오른쪽 [업데이트 확인].
 - 본문: 흰 패널(PANEL)들을 세로로 쌓음. 패널은 1px 테두리, 직각 모서리, 그림자 없음.
 - 상태줄(맨 아래, 네이비 바탕): 상태 단어(준비·진행 중·조회 완료·정지 중·조회 멈춤·오류·안내 등) + 문장. 진행 중에는 앰버 진행 막대, 오류면 바탕 빨강.
@@ -309,7 +309,7 @@ category_order 순서대로 처음 맞는 것: 리스크(리스크 점수가 붙
 | 구글 뉴스 RSS(news.google.com) | 기사 검색, 원문 주소 찾기 |
 | 전문지 RSS(각 언론사 `/rss/allArticle.xml` 등) | 전문지 전체 기사 |
 | 네이버 검색 API(선택) | 출처를 네이버로 고른 때만 |
-| GitHub Releases | 새 버전 확인·내려받기 |
+| 중계함(업데이트) | 새 버전 확인(`latest`)·exe 조각 내려받기(`chunk`, 4MB) — 부서 계정 드라이브 `KOHOM뉴스룸_업데이트` 폴더 |
 | 중계함(선택) | 보고 기록 공유. 부서 공용 구글 계정의 Apps Script 웹 앱(script.google.com)에 POST 한 번: 이 PC 기록을 올리고 다른 PC 기록을 받음. 암호로 확인 |
 | 공유 폴더(선택) | 보고 기록 공유. 구글 드라이브(데스크톱용)가 올리고 내려받기를 맡음 — 앱은 폴더 파일만 읽고 씀 |
 
@@ -379,13 +379,13 @@ Pretendard(Regular·SemiBold·Bold, SIL OFL, exe에 내장, PC 설치 없음). �
 | calendar_kr.py | 영업일·공휴일, 자동 기간 |
 | selection.py | AI 선별 요청문, 선정 결과 해석, 규칙 개선 요청문 |
 | report.py | 메일 제목, HTML 보고서(본문 ①·②) |
-| history.py / history_share.py / relay_script.py / mail_import.py | 보고 기록·취소 표시 / 중계함·공유 폴더와 맞추기 / 중계함 대본(Apps Script) / 지난 메일(HTML·EML·MHT) 읽기 |
+| history.py / history_share.py / relay_script.py / mail_import.py | 보고 기록·취소 표시 / 중계함·공유 폴더와 맞추기, 연결 파일 / 중계함 대본(Apps Script: 기록 공유·업데이트) / 지난 메일(HTML·EML·MHT) 읽기 |
 | export.py | 결과 엑셀 4시트 |
 | config.py | 설정 읽기·쓰기, 이전 버전 설정 옮기기 |
-| updater.py | 새 버전 확인·내려받기·교체 |
+| updater.py | 중계함으로 새 버전 확인·조각 내려받기(크기·SHA-256 확인)·교체 |
 | version.py | 버전 번호 |
 
-배포: GitHub Actions(build.yml)가 규칙 점검 52개(tests/check_rules.py)와 보고 기록 공유 시험 19개(tests/check_history.py, 중계함 대본을 node 로 돌려 왕복 확인)를 통과해야 exe를 만들고 Releases에 올린다. 매뉴얼 화면은 manual.yml이 윈도우 1920×1080에서 시연 데이터로 찍는다.
+배포(v1.3.0~, GitHub 안 씀): 부서 Windows PC에서 `build.bat`이 규칙 점검 52개(tests/check_rules.py)·공유·업데이트 시험(tests/check_history.py)·exe 교체 시험을 통과해야 `dist\NewsMonitor_v버전.exe`를 만든다. 관리자가 이를 부서 드라이브 `KOHOM뉴스룸_업데이트` 폴더에 올리면 각 PC 앱이 중계함으로 받아 스스로 교체한다. 앞으로 고칠 Claude는 `CLAUDE.md`, 사람은 `docs/관리자_안내서.md`를 본다.
 
 ---
 

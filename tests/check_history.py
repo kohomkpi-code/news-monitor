@@ -8,6 +8,8 @@
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import datetime as dt
+import base64
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -18,6 +20,7 @@ import requests
 import history
 import history_share as hs
 import relay_script
+import updater
 
 root = tempfile.mkdtemp()
 share = os.path.join(root, "공유 드라이브")
@@ -129,16 +132,32 @@ check("PC 이름의 특수문자는 파일 이름에서 _ 로", os.path.basename
 
 # ---------------------------------------------------------------- 2부: 중계함
 NODE_MOCK = r"""
-const fs = require('fs');
+// 구글 Apps Script 의 DriveApp·Utilities 등을 흉내 — 드라이브는 {폴더: {파일: base64}} 로 STATE 파일에 둔다
+const fs = require('fs'), crypto = require('crypto');
 const STATE = process.argv[2], REQ = process.argv[3];
-let files = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, 'utf8')) : null;  // null = 폴더 아직 없음
+const drive = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, 'utf8')) : {};
+const props = drive.__props__ || (drive.__props__ = {});
 function iter(a) { let i = 0; return { hasNext: () => i < a.length, next: () => a[i++] }; }
-function file(n) { return { getName: () => n, setContent: c => { files[n] = c; },
-                            getBlob: () => ({ getDataAsString: () => files[n] }) }; }
-const folderObj = { getFilesByName: n => iter(n in files ? [file(n)] : []),
-                    createFile: (n, c) => { files[n] = c; return file(n); },
-                    getFiles: () => iter(Object.keys(files).map(file)) };
-const DriveApp = { getFoldersByName: () => iter(files ? [folderObj] : []), createFolder: () => { files = {}; return folderObj; } };
+function file(dir, n) {
+  const buf = () => Buffer.from(drive[dir][n], 'base64');
+  return { getName: () => n, getId: () => dir + '/' + n, getSize: () => buf().length,
+           getLastUpdated: () => new Date(0),
+           setContent: c => { drive[dir][n] = Buffer.from(c, 'utf8').toString('base64'); },
+           getBlob: () => ({ getDataAsString: () => buf().toString('utf8'),
+                             getBytes: () => Array.from(new Int8Array(buf())) }) };
+}
+function folder(dir) {
+  return { getFilesByName: n => iter(n in drive[dir] ? [file(dir, n)] : []),
+           createFile: (n, c) => { drive[dir][n] = Buffer.from(c, 'utf8').toString('base64'); return file(dir, n); },
+           getFiles: () => iter(Object.keys(drive[dir]).map(n => file(dir, n))) };
+}
+const DriveApp = { getFoldersByName: n => iter(n in drive ? [folder(n)] : []),
+                   createFolder: n => { drive[n] = {}; return folder(n); } };
+const toBuf = bytes => Buffer.from(Int8Array.from(bytes).buffer);
+const Utilities = { base64Encode: bytes => toBuf(bytes).toString('base64'),
+                    DigestAlgorithm: { SHA_256: 'sha256' },
+                    computeDigest: (alg, bytes) => Array.from(new Int8Array(crypto.createHash(alg).update(toBuf(bytes)).digest())) };
+const PropertiesService = { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => { props[k] = v; } }) };
 const LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) };
 const ContentService = { MimeType: { JSON: 'json' }, createTextOutput: t => ({ t, setMimeType() { return this; } }) };
 """
@@ -179,7 +198,7 @@ else:
     with open(js, "w", encoding="utf-8") as f:
         f.write(NODE_MOCK + script + """
 const res = doPost({ postData: { contents: fs.readFileSync(REQ, 'utf8') } });
-fs.writeFileSync(STATE, JSON.stringify(files || {}));
+fs.writeFileSync(STATE, JSON.stringify(drive));
 process.stdout.write(res.t);
 """)
     hs.requests.post = fake_post
@@ -191,8 +210,9 @@ process.stdout.write(res.t);
     history.mark_sent([entry(11), entry(12)])
     r = hs.sync_relay(URL, KEY, "담당자R")
     drive = json.load(open(state, encoding="utf-8"))
+    mine_b64 = drive["KOHOM뉴스룸_보고기록"]["보고기록_담당자R.json"]
     check("중계함: 담당자 기록이 부서 계정 드라이브 폴더에 올라감(보고기록_담당자R.json)",
-          r.ok and r.pcs == 1 and set(json.loads(drive["보고기록_담당자R.json"])["records"]) == {
+          r.ok and r.pcs == 1 and set(json.loads(base64.b64decode(mine_b64))["records"]) == {
               "https://news/11", "https://news/12"})
     on("대리자R")
     r = hs.sync_relay(URL, KEY, "대리자R")
@@ -203,6 +223,37 @@ process.stdout.write(res.t);
     on("담당자R")
     r = hs.sync_relay(URL, KEY, "담당자R")
     check("중계함: 대리자가 취소한 기록이 담당자 PC 에서도 빠짐", r.cancelled == 1 and set(history.load()) == {"https://news/11"})
+    # 업데이트: 부서 계정 드라이브 'KOHOM뉴스룸_업데이트' 폴더에 올린 exe 를 조각으로 받아 오기
+    info = updater.check_latest(URL, KEY)
+    check("업데이트: 올린 파일이 없으면 '새 버전 없음'", info.version == "" and not updater.is_newer(info.version))
+    exe = os.urandom(9 * 1024 * 1024 + 123)  # 4MB 조각 3개
+    drive = json.load(open(state, encoding="utf-8"))
+    drive["KOHOM뉴스룸_업데이트"].update({
+        "NewsMonitor_v1.2.9.exe": base64.b64encode(b"old").decode(),
+        "NewsMonitor_v1.10.0.exe": base64.b64encode(exe).decode(),
+        "설명서.pdf": base64.b64encode(b"x").decode(),
+        "변경내용.txt": base64.b64encode("보고 기록 화면 개선".encode()).decode()})
+    json.dump(drive, open(state, "w", encoding="utf-8"))
+    info = updater.check_latest(URL, KEY)
+    check("업데이트: 버전 숫자가 가장 큰 exe(1.10.0 > 1.2.9)를 새 버전으로 알려 줌",
+          info.version == "1.10.0" and info.name == "NewsMonitor_v1.10.0.exe" and info.chunks == 3
+          and info.size == len(exe) and info.notes == "보고 기록 화면 개선" and updater.is_newer(info.version, "1.3.0"))
+    dest = os.path.join(relay_dir, "NewsMonitor.new.exe")
+    updater.download(info, URL, KEY, dest)
+    check("업데이트: 조각 3개를 받아 올린 파일과 똑같이 만듦(크기·확인값)", open(dest, "rb").read() == exe)
+    try:
+        updater.download(dataclasses.replace(info, sha256="0" * 64), URL, KEY, dest)
+        bad = False
+    except updater.UpdateCheckError:
+        bad = not os.path.exists(dest)
+    check("업데이트: 받은 파일이 다르면 지우고 실패로 알림", bad)
+    try:
+        updater.check_latest(URL, "틀린암호")
+        wrong = False
+    except updater.UpdateCheckError as e:
+        wrong = "암호" in str(e)
+    check("업데이트: 암호가 틀리면 이유를 알림", wrong)
+
     before = history.load()
     r = hs.sync_relay(URL, "틀린암호", "담당자R")
     check("중계함: 암호가 틀리면 거절, 이 PC 기록은 그대로", not r.ok and "암호" in r.message and history.load() == before)
@@ -216,6 +267,23 @@ process.stdout.write(res.t);
     r = hs.sync_relay(URL, KEY, "담당자R")
     check("중계함: 인터넷이 끊기면 안내하고 이 PC 기록은 그대로", not r.ok and "연결하지 못했습니다" in hs.describe(r)
           and history.load() == before)
+
+# ---------------------------------------------------------------- 3부: exe 옆 연결 파일
+code = f"{URL}#{KEY}"
+conn_dir = os.path.join(root, "설치 폴더")
+os.makedirs(conn_dir)
+with open(os.path.join(conn_dir, hs.CONNECTION_FILE), "w", encoding="utf-8") as f:
+    f.write(hs.connection_file_text(URL, KEY))
+check("연결 파일에서 연결 코드를 읽음(설명 줄은 건너뜀)", hs.read_connection_file(conn_dir) == code)
+check("연결 파일이 없으면 ''", hs.read_connection_file(os.path.join(root, "없는 곳")) == "")
+cfg = {"share_mode": "off"}
+check("연결 파일을 처음 보면 중계함이 저절로 켜짐(직원 할 일 없음)",
+      hs.apply_connection(cfg, code) and cfg["share_mode"] == "relay" and cfg["share_url"] == URL and cfg["share_key"] == KEY)
+cfg["share_mode"] = "off"
+check("같은 연결 파일이면 다시 켜지 않음(사용자가 끈 설정 존중)", not hs.apply_connection(cfg, code) and cfg["share_mode"] == "off")
+check("암호를 바꾼 새 연결 파일이면 새 암호로 다시 켬", hs.apply_connection(cfg, URL + "#new123") and cfg["share_key"] == "new123"
+      and cfg["share_mode"] == "relay")
+check("형식이 틀린 내용은 설정을 건드리지 않음", not hs.apply_connection({}, "") and not hs.apply_connection({}, "아무글"))
 
 shutil.rmtree(root, ignore_errors=True)
 print("\nALL", "PASS" if all(results) else "FAIL", f"{sum(results)}/{len(results)}")

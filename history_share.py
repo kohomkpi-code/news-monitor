@@ -16,6 +16,7 @@
 import dataclasses
 import datetime as dt
 import glob
+import hashlib
 import json
 import os
 import re
@@ -172,6 +173,46 @@ def parse_code(text: str) -> tuple[str, str] | None:
     if not url.startswith("https://") or not key:
         return None
     return url, key
+
+
+CONNECTION_FILE = "KOHOM뉴스룸_연결.txt"
+
+
+def connection_file_text(url: str, key: str) -> str:
+    """[설정] → [연결 파일 만들기]로 저장하는 내용. 첫 https 줄이 연결 코드다."""
+    return (f"{url}#{key}\n"
+            "# KOHOM 뉴스룸 연결 파일 — 이 파일을 NewsMonitor_v○○.exe 와 같은 폴더에 두고 앱을 켜면\n"
+            "# 보고 기록 공유와 자동 업데이트가 저절로 연결됩니다(부서 구글 계정의 중계함).\n"
+            "# 암호가 들어 있으니 함께 쓰는 직원에게만 전하세요. 고치지 마세요.\n")
+
+
+def read_connection_file(folder: str) -> str:
+    """exe 옆 연결 파일의 연결 코드. 없거나 형식이 다르면 ''."""
+    try:
+        with open(os.path.join(folder, CONNECTION_FILE), "r", encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("https://") and parse_code(line):
+                    return line
+    except (OSError, UnicodeDecodeError):
+        pass
+    return ""
+
+
+def apply_connection(cfg: dict, code: str) -> bool:
+    """연결 파일의 중계함 연결을 설정에 넣는다(바뀌었으면 True → 설정 저장).
+    처음 보는 연결 코드면(첫 설치·암호를 바꾼 새 연결 파일) 중계함을 켜고 주소·암호를 넣는다 — 직원은 할 일이 없다.
+    같은 코드를 이미 넣었으면 그 뒤 사용자가 바꾼 설정(끔 등)은 그대로 둔다."""
+    got = parse_code(code) if code else None
+    if not got:
+        return False
+    mark = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
+    if cfg.get("share_applied") == mark:
+        return False
+    cfg["share_url"], cfg["share_key"] = got
+    cfg["share_mode"] = "relay"
+    cfg["share_applied"] = mark
+    return True
 
 
 def sync_relay(url: str, key: str, pc: str, timeout: int = 60) -> SyncResult:

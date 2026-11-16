@@ -103,6 +103,8 @@ class App(tk.Tk):
         theme.setup_styles(self, self.F)
 
         self.cfg = config.load()
+        if history_share.apply_connection(self.cfg, history_share.read_connection_file(config.app_dir())):
+            config.save(self.cfg)  # exe 옆 연결 파일로 보고 기록 공유·업데이트를 연결했다
         self.arts: dict[str, Article] = {}        # 줄 id → 기사 (두 탭이 함께 씀)
         self.next_id = 0
         self.request_map: dict[int, str] = {}     # 'AI 선별 요청문'의 번호 → 줄 id
@@ -783,6 +785,25 @@ class App(tk.Tk):
         self._set_status("연결 코드(주소#암호)를 복사했습니다. 다른 PC 의 [설정] → [연결 코드 붙여넣기]로 옮기세요. "
                          "암호가 들어 있으니 함께 쓰는 직원에게만 전하세요.", word="중계함")
 
+    def _save_connection_file(self):
+        url, key = self.setting_vars["share_url"].get().strip(), self.setting_vars["share_key"].get().strip()
+        if not history_share.parse_code(f"{url}#{key}"):
+            messagebox.showinfo("연결 파일", "중계함 주소와 암호를 먼저 넣으세요.")
+            return
+        path = filedialog.asksaveasfilename(parent=self, title="연결 파일 저장 — exe 와 같은 폴더에 두고 함께 나눠 주세요",
+                                            initialfile=history_share.CONNECTION_FILE, defaultextension=".txt",
+                                            filetypes=[("텍스트", "*.txt")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(history_share.connection_file_text(url, key))
+        except OSError as e:
+            messagebox.showerror("연결 파일", f"저장하지 못했습니다.\n{e}")
+            return
+        self._set_status(f"연결 파일을 저장했습니다: {os.path.basename(path)} — exe 와 같은 폴더에 두면 그 PC 는 켜자마자 "
+                         "보고 기록 공유·업데이트가 연결됩니다. 암호가 들어 있으니 함께 쓰는 직원에게만.", word="중계함")
+
     def _paste_relay_code(self):
         try:
             text = self.clipboard_get()
@@ -869,7 +890,7 @@ class App(tk.Tk):
 
         box, _ = section("보고 기록 공유",
                          "담당자가 없어도 다른 PC에서 같은 보고 기록을 씁니다. 앱을 켤 때·조회할 때·기록할 때 자동으로 맞춥니다.\n"
-                         "중계함: 부서 계정에 한 번 만들어 두면 각 PC는 앱만 있으면 됨 · 공유 폴더: PC마다 구글 드라이브 설치 필요")
+                         "중계함: 부서 계정에 한 번 만들어 두면 각 PC는 앱만 있으면 됨(새 버전 업데이트도 중계함으로 받음)")
         self.share_mode_var = tk.StringVar()
         r = tk.Frame(box, bg=PANEL)
         r.pack(fill="x", pady=(0, 4))
@@ -899,11 +920,12 @@ class App(tk.Tk):
         r = tk.Frame(box, bg=PANEL)
         r.pack(fill="x", pady=2)
         ttk.Label(r, text="", style="Panel.TLabel", width=14).pack(side="left")
-        for text, cmd in (("연결 코드 복사", self._copy_relay_code), ("연결 코드 붙여넣기", self._paste_relay_code)):
+        for text, cmd in (("연결 파일 만들기", self._save_connection_file), ("연결 코드 복사", self._copy_relay_code),
+                          ("연결 코드 붙여넣기", self._paste_relay_code)):
             b = ttk.Button(r, text=text, style="Small.TButton", command=cmd)
             b.pack(side="left", padx=(0, 6))
             self.share_relay_widgets.append(b)
-        ttk.Label(r, text="다른 PC로 주소·암호 옮기기", style="PanelDesc.TLabel").pack(side="left", padx=(2, 0))
+        ttk.Label(r, text="다른 PC로 옮기기", style="PanelDesc.TLabel").pack(side="left", padx=(2, 0))
         r = tk.Frame(box, bg=PANEL)
         r.pack(fill="x", pady=2)
         ttk.Label(r, text="공유 폴더", style="Panel.TLabel", width=14).pack(side="left")
@@ -2223,18 +2245,28 @@ class App(tk.Tk):
         self._set_status("업데이트 확인 중…", word="업데이트")
         threading.Thread(target=self._update_worker, args=(True,), daemon=True).start()
 
+    def _relay_conn(self) -> tuple[str, str]:
+        """업데이트에 쓸 중계함 주소·암호(보고 기록 공유의 중계함 값)."""
+        return str(self.cfg.get("share_url", "")).strip(), str(self.cfg.get("share_key", "")).strip()
+
     def _update_worker(self, verbose: bool):
+        url, key = self._relay_conn()
+        if not (url and key) and not verbose:
+            return  # 켤 때 자동 확인: 연결이 없으면 조용히 넘어간다
         try:
-            info = updater.check_latest()
+            info = updater.check_latest(url, key)
         except Exception as e:  # 어떤 오류든 '확인 중…'에 멈춰 있지 않게 이유를 보여 준다
             info = str(e) or type(e).__name__
-        self.after(0, self._update_result, info, verbose)
+        try:
+            self.after(0, self._update_result, info, verbose)
+        except RuntimeError:
+            pass
 
     def _update_result(self, info, verbose: bool):
         if isinstance(info, str):
             if verbose:  # [업데이트 확인]을 직접 눌렀을 때만 알린다(켤 때 자동 확인은 조용히)
                 self._set_status(f"업데이트를 확인하지 못했습니다: {info}", word="업데이트", kind="error")
-                messagebox.showwarning("업데이트 확인 실패", self._no_github_message(info))
+                messagebox.showwarning("업데이트 확인 실패", self._update_fail_message(info))
             return
         if not updater.is_newer(info.version):
             if verbose:
@@ -2242,23 +2274,23 @@ class App(tk.Tk):
             return
 
         notes = ("\n\n변경 내용:\n" + info.notes[:600]) if info.notes else ""
-        if updater.is_frozen() and info.asset_url:
-            if messagebox.askyesno("업데이트", f"새 버전 {info.version} 이 있습니다. 지금 업데이트할까요?\n"
+        if updater.is_frozen():
+            if messagebox.askyesno("업데이트", f"새 버전 v{info.version} 이 있습니다. 지금 업데이트할까요?\n"
                                    f"(내려받은 뒤 앱이 자동으로 다시 시작됩니다){notes}"):
                 self._apply_update(info)
         else:
-            if messagebox.askyesno("업데이트", f"새 버전 {info.version} 이 있습니다. 다운로드 페이지를 열까요?{notes}"):
-                webbrowser.open(info.page_url)
+            messagebox.showinfo("업데이트", f"새 버전 v{info.version} 이 부서 구글 드라이브에 있습니다.\n"
+                                "소스로 실행 중이라 자동 교체는 하지 않습니다.")
 
-    def _no_github_message(self, detail: str) -> str:
-        return ("이 PC에서 GitHub(github.com)에 접속할 수 없어 새 버전을 확인하지 못했습니다.\n"
-                "회사 보안정책으로 GitHub 접속이 막힌 PC일 수 있습니다.\n\n"
-                "새 버전이 필요하면 공문으로 안내된 곳에서 최신 파일(NewsMonitor_v○○.exe)을 받아\n"
-                "지금 쓰는 파일과 바꿔 주세요. 설정과 보고 기록은 그대로 남습니다.\n"
-                "(외부에서는 github.com/kohomkpi-code/news-monitor/releases 에서 받을 수 있습니다.)\n\n"
+    def _update_fail_message(self, detail: str) -> str:
+        return ("부서 구글 드라이브(중계함)에서 새 버전을 확인하지 못했습니다.\n"
+                "인터넷 연결, 또는 [설정] → 보고 기록 공유 → 중계함 연결을 확인하세요.\n\n"
+                "새 버전이 급하면 담당자에게 최신 파일(NewsMonitor_v○○.exe)을 받아\n"
+                "지금 쓰는 파일과 같은 폴더에 두고 옛 파일을 지우세요. 설정과 보고 기록은 그대로 남습니다.\n\n"
                 f"지금 버전: v{__version__}\n오류 내용: {detail}")
 
     def _apply_update(self, info):
+        url, key = self._relay_conn()
         win = tk.Toplevel(self)
         win.title("업데이트 중")
         win.configure(bg=PANEL)
@@ -2273,9 +2305,9 @@ class App(tk.Tk):
 
         def worker():
             try:
-                updater.apply_update(info.asset_url, progress)
+                updater.apply_update(info, url, key, progress)
             except Exception as e:
-                msg = self._no_github_message(f"{type(e).__name__}: {e}"[:200]).replace(
+                msg = self._update_fail_message(f"{type(e).__name__}: {e}"[:200]).replace(
                     "새 버전을 확인하지 못했습니다", "새 버전 파일을 내려받지 못했습니다")
                 self.after(0, lambda: (win.destroy(), messagebox.showerror("업데이트 실패", msg)))
 

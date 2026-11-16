@@ -1,15 +1,16 @@
-"""GitHub Releases 를 확인해 새 버전이 있으면 내려받고 스스로 교체한다.
+"""새 버전 확인·내려받기·스스로 교체 — 부서 구글 드라이브의 중계함(relay_script.py)을 통해 (v1.3.0~, GitHub 안 씀).
 
 흐름:
-1. https://api.github.com/repos/<저장소>/releases/latest 에서 최신 태그(v0.2.0 등) 확인
-2. 현재 버전보다 높으면 첨부된 NewsMonitor.exe 를 옆에 'NewsMonitor.new.exe' 로 내려받음
-3. 작은 배치 파일(.bat)을 만들어 실행: 앱 종료를 기다렸다가 새 exe 를 버전 이름
-   (NewsMonitor_v0.4.0.exe)으로 놓고, 옛 exe 를 지운 뒤 새 것을 실행
+1. 중계함에 'latest' 를 물어 업데이트 폴더(부서 계정 드라이브 'KOHOM뉴스룸_업데이트')에서 버전이 가장 큰
+   NewsMonitor_v1.3.1.exe 의 버전·크기·확인값(SHA-256)을 받는다
+2. 지금 버전보다 높으면 'chunk' 로 4MB 씩 받아 옆에 'NewsMonitor.new.exe' 로 저장하고 크기·확인값을 맞춰 본다
+3. 작은 배치 파일(.bat)을 만들어 실행: 앱 종료를 기다렸다가 새 exe 를 버전 이름으로 놓고, 옛 exe 를 지운 뒤 새 것을 실행
    (실행 중인 exe 는 윈도우가 덮어쓰기를 막기 때문에 이렇게 한다)
-
-소스(app.py)로 실행 중일 때는 교체하지 않고 Release 페이지만 열어 준다.
+중계함 주소·암호는 [설정]의 보고 기록 공유(중계함) 값을 함께 쓴다. 소스(app.py)로 실행 중일 때는 교체하지 않는다.
 """
 
+import base64
+import hashlib
 import os
 import re
 import subprocess
@@ -19,18 +20,18 @@ from dataclasses import dataclass
 
 import requests
 
-from version import EXE_NAME, GITHUB_REPO, __version__, versioned_exe_name
-
-API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases"
+from history_share import RELAY_ERRORS
+from version import __version__
 
 
 @dataclass
 class ReleaseInfo:
-    version: str
-    asset_url: str | None
-    page_url: str
-    notes: str
+    version: str      # '' = 업데이트 폴더에 올린 파일 없음
+    name: str = ""    # NewsMonitor_v1.3.1.exe
+    size: int = 0
+    sha256: str = ""
+    chunks: int = 0
+    notes: str = ""   # 업데이트 폴더의 '변경내용.txt'
 
 
 def _parse(v: str) -> tuple[int, ...]:
@@ -43,72 +44,60 @@ def _parse(v: str) -> tuple[int, ...]:
 
 
 def is_newer(remote: str, local: str = __version__) -> bool:
-    return _parse(remote) > _parse(local)
+    return bool(remote) and _parse(remote) > _parse(local)
 
 
 class UpdateCheckError(Exception):
-    """업데이트 확인 실패 이유(상태 표시줄에 보여 줌)."""
+    """업데이트 확인·내려받기 실패 이유(상태 표시줄·안내창에 보여 줌)."""
 
 
-def _latest_by_redirect(timeout: int) -> ReleaseInfo:
-    """API 가 막혔을 때(예: 같은 인터넷 주소를 쓰는 사람이 많아 시간당 60회 한도 초과)
-    github.com/…/releases/latest 가 최신 태그 주소로 넘겨 주는 것을 이용한다."""
-    resp = requests.get(f"{RELEASES_PAGE}/latest", timeout=timeout, allow_redirects=False)
-    loc = resp.headers.get("Location", "")
-    if resp.status_code not in (301, 302) or "/tag/" not in loc:
-        raise UpdateCheckError(f"GitHub 응답 {resp.status_code}")
-    tag = loc.rsplit("/tag/", 1)[1]
-    return ReleaseInfo(
-        version=tag,
-        asset_url=f"{RELEASES_PAGE}/download/{tag}/{versioned_exe_name(tag)}",
-        page_url=loc,
-        notes="",
-    )
-
-
-def check_latest(timeout: int = 10) -> ReleaseInfo:
-    """최신 Release 정보. 실패하면 UpdateCheckError(이유)."""
+def _post(url: str, key: str, payload: dict, timeout: int) -> dict:
     try:
-        resp = requests.get(API_LATEST, timeout=timeout,
-                            headers={"Accept": "application/vnd.github+json"})
+        resp = requests.post(url, json={"key": key, **payload}, timeout=timeout)
     except requests.exceptions.SSLError as e:
         raise UpdateCheckError("보안 인증서 확인 실패(회사 보안장비)") from e
     except requests.RequestException as e:
-        raise UpdateCheckError(f"네트워크 오류: {type(e).__name__}") from e
-    if resp.status_code != 200:
-        try:
-            return _latest_by_redirect(timeout)
-        except requests.RequestException as e:
-            raise UpdateCheckError(f"GitHub 응답 {resp.status_code}") from e
-    data = resp.json()
-    # 버전 이름(NewsMonitor_v0.4.0.exe)을 먼저 찾고, 없으면 예전 이름(NewsMonitor.exe)
-    assets = {a.get("name", "").lower(): a.get("browser_download_url") for a in data.get("assets", [])}
-    asset_url = (assets.get(versioned_exe_name(data.get("tag_name", "")).lower())
-                 or assets.get(EXE_NAME.lower()))
-    return ReleaseInfo(
-        version=data.get("tag_name", ""),
-        asset_url=asset_url,
-        page_url=data.get("html_url", RELEASES_PAGE),
-        notes=(data.get("body") or "").strip(),
-    )
+        raise UpdateCheckError(f"중계함에 연결하지 못했습니다({type(e).__name__})") from e
+    try:
+        body = resp.json()
+    except ValueError as e:
+        raise UpdateCheckError(f"중계함 답이 이상합니다(HTTP {resp.status_code})") from e
+    if not isinstance(body, dict) or not body.get("ok"):
+        err = body.get("error", "") if isinstance(body, dict) else ""
+        raise UpdateCheckError(RELAY_ERRORS.get(err, f"중계함 오류: {err or '알 수 없음'}"))
+    return body
+
+
+def check_latest(url: str, key: str, timeout: int = 30) -> ReleaseInfo:
+    """업데이트 폴더의 최신 파일 정보. 실패하면 UpdateCheckError(이유)."""
+    if not url.strip() or not key.strip():
+        raise UpdateCheckError("중계함 연결이 없습니다([설정] → 보고 기록 공유 → 중계함)")
+    b = _post(url.strip(), key.strip(), {"action": "latest"}, timeout)
+    return ReleaseInfo(version=str(b.get("version") or ""), name=str(b.get("name") or ""),
+                       size=int(b.get("size") or 0), sha256=str(b.get("sha256") or "").lower(),
+                       chunks=int(b.get("chunks") or 0), notes=str(b.get("notes") or "").strip())
 
 
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
-def download(url: str, dest: str, progress=None) -> None:
-    with requests.get(url, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        total = int(r.headers.get("Content-Length") or 0)
-        done = 0
-        with open(dest, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 256):
-                if chunk:
-                    f.write(chunk)
-                    done += len(chunk)
-                    if progress and total:
-                        progress(done / total)
+def download(info: ReleaseInfo, url: str, key: str, dest: str, progress=None) -> None:
+    """조각을 차례로 받아 dest 에 저장하고 크기·확인값을 맞춰 본다(다르면 지우고 UpdateCheckError)."""
+    h = hashlib.sha256()
+    done = 0
+    with open(dest, "wb") as f:
+        for i in range(info.chunks):
+            b = _post(url.strip(), key.strip(), {"action": "chunk", "name": info.name, "index": i}, timeout=180)
+            data = base64.b64decode(b.get("data", ""))
+            f.write(data)
+            h.update(data)
+            done += len(data)
+            if progress and info.size:
+                progress(min(done / info.size, 1.0))
+    if done != info.size or h.hexdigest() != info.sha256:
+        os.remove(dest)
+        raise UpdateCheckError("내려받은 파일이 드라이브에 올린 파일과 다릅니다 — 잠시 뒤 다시 시도")
 
 
 # 교체용 배치 파일. 경로는 글자로 써 넣지 않고 인자로 넘긴다(한글·공백이 든 경로도 깨지지 않게).
@@ -164,14 +153,14 @@ start "" "%TARGET%"
 _EXE_RE = re.compile(r"^NewsMonitor(_v[0-9.]+)?\.exe$", re.IGNORECASE)
 
 
-def apply_update(asset_url: str, progress=None) -> None:
+def apply_update(info: ReleaseInfo, url: str, key: str, progress=None) -> None:
     """새 exe 를 내려받고 교체용 배치 파일을 실행한 뒤 현재 앱을 종료한다.
 
     exe(PyInstaller 한 파일 방식)는 실행하면 프로세스가 두 개 뜬다: 압축을 푸는 '바깥'과
     실제 앱인 '안쪽'. 안쪽이 끝나도 바깥이 잠깐 exe 를 붙잡고 있어서, 곧바로 바꾸면
     실패한다(v0.3.0 까지의 버그). 그래서 성공할 때까지 1초 간격으로 최대 60번 다시 시도하고,
     결과를 exe 옆 update_log.txt 에 남긴다.
-    새 exe 는 내려받은 파일 이름(NewsMonitor_v0.4.0.exe 등)으로 두고 옛 exe 는 지운다.
+    새 exe 는 올린 파일 이름(NewsMonitor_v1.3.1.exe 등)으로 두고 옛 exe 는 지운다.
     """
     if not is_frozen():
         raise RuntimeError("소스로 실행 중일 때는 자동 교체를 하지 않습니다.")
@@ -180,9 +169,8 @@ def apply_update(asset_url: str, progress=None) -> None:
     folder = os.path.dirname(current)
     new_path = os.path.join(folder, "NewsMonitor.new.exe")
     log_path = os.path.join(folder, "update_log.txt")
-    name = os.path.basename(asset_url.split("?")[0])
-    target = os.path.join(folder, name) if _EXE_RE.match(name) else current
-    download(asset_url, new_path, progress)
+    target = os.path.join(folder, info.name) if _EXE_RE.match(info.name) else current
+    download(info, url, key, new_path, progress)
 
     bat = os.path.join(tempfile.gettempdir(), "newsmonitor_update.bat")
     with open(bat, "w", encoding="ascii", newline="\r\n") as f:

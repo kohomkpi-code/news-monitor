@@ -2,10 +2,10 @@
 
 앱 화면이 바뀌면 아래 순서로 매뉴얼(PPT·PDF)을 다시 만든다. 결과물은 `docs/manual/`.
 
-1. **화면 찍기** — GitHub → Actions → `manual` → Run workflow.
-   윈도우 PC(1920×1080)에서 시연 기사(`demo_data.py`)로 앱을 조작하며 화면 14장과 위치표(`geometry.json`)를
-   `manual-shots` 브랜치에 올린다. 개발 PC 에서는 `xvfb-run python tools/manual/capture.py 출력폴더`.
-2. **PPT 만들기** — `manual-shots` 를 내려받은 폴더로
+1. **화면 찍기** — 부서 Windows PC(화면 1920×1080)에서 `python tools/manual/capture.py 화면폴더`
+   (부품: `pip install playwright`, 보고서 화면은 Edge 로 찍음). 시연 기사(`demo_data.py`)로 앱을 조작하며 화면 14장과
+   위치표(`geometry.json`)를 남긴다. (v1.2.0 까지는 GitHub Actions `manual` 이 찍었다 — v1.3.0 부터 GitHub 안 씀)
+2. **PPT 만들기** — 화면 폴더로
    `node tools/manual/build_deck.js <화면 폴더> <출력 폴더>` (부품: `npm install pptxgenjs react react-dom react-icons sharp`)
 3. **마무리** — `python tools/manual/finish_deck.py <출력 폴더>/*.pptx`
    (모든 문단 '한글 단어 잘림 허용' 해제 = 어절 단위 줄바꿈, 한글 글꼴 칸을 한국어로)

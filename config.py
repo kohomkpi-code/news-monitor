@@ -1,7 +1,7 @@
 """설정(config.json) 관리.
 
 - 설정 파일은 exe(또는 app.py)와 같은 폴더에 생긴다.
-- 네이버 Client ID/Secret 은 이 파일에만 저장되고 GitHub 에는 올라가지 않는다(.gitignore).
+- 네이버 Client ID/Secret·중계함 암호는 이 파일에만 저장되고 소스에는 없다(.gitignore).
 - source: 기사 출처. "google"(구글 뉴스, 키 불필요) 또는 "naver"(네이버, 키 필요).
 - rules: 선정 규칙(키워드 A·S·B, 제외어, 점수, 추천 …). 기본값과 설명은 rules.py, [선정 규칙] 탭에서 고친다.
   rules_log: 규칙을 바꾼 이력(언제, 어떻게, 무엇을). "keywords" 는 검색 키워드 전체(A→S→B, 자동).
@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
     "share_mode": "",          # 보고 기록 공유: off | relay(중계함) | folder(공유 폴더). 빈칸 = v1.1.0 설정(폴더 있으면 folder)
     "share_url": "",           # 중계함(Apps Script 웹 앱) 주소
     "share_key": "",           # 중계함 암호 — 이 PC config.json 에만(엑셀·규칙 파일에 넣지 않음)
+    "share_applied": "",       # 마지막으로 넣은 연결 파일(KOHOM뉴스룸_연결.txt)의 표시값 — 같은 파일을 다시 넣지 않게
     "share_dir": "",           # 보고 기록 공유 폴더(구글 드라이브 등)(history_share.py)
     "share_pc": "",            # 공유 폴더 파일 이름에 쓸 이 PC 이름. 비우면 컴퓨터 이름
 }

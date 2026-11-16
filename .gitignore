@@ -9,3 +9,6 @@ dist/
 *.spec
 __pycache__/
 *.pyc
+sent_history_removed.json
+# 중계함 연결 파일(암호 포함) — 소스에 넣지 않음
+KOHOM뉴스룸_연결.txt
